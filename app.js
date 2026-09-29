@@ -1,3 +1,4 @@
+const APP_VERSION='v4.0';
 const state={months:{},month:'',chart:null};
 const RESTAURANT_MAPPING = window.RESTAURANT_MAPPING || {};
 function applyMapping(row){const m=RESTAURANT_MAPPING[norm(row.restaurant)];if(m){row.restaurant_code=row.restaurant_code||m.code||'';row.center=m.center||row.center||'';row.group=m.group||row.group||'';}else{row.center=row.center||'未對應';}return row;}
@@ -22,11 +23,27 @@ function detectMonth(rows,dateIdx){for(const r of rows){let v=r[dateIdx];if(v in
 function loadLocal(){try{state.months=JSON.parse(localStorage.getItem('gesMonths')||'{}')}catch{};const ks=Object.keys(state.months).sort();if(ks.length){state.month=ks.at(-1);refreshMonthSelect();render()}}
 function saveLocal(){localStorage.setItem('gesMonths',JSON.stringify(state.months))}
 function refreshMonthSelect(){const s=document.querySelector('#monthSelect');let ks=Object.keys(state.months).sort().reverse();s.innerHTML=ks.length?ks.map(m=>`<option ${m===state.month?'selected':''}>${m}</option>`).join(''):'<option value="">尚未匯入月份</option>'}
-async function importFile(file){const data=await file.arrayBuffer();const wb=XLSX.read(data,{type:'array',cellDates:true});let best=null;for(const sn of wb.SheetNames){let a=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:''});if(!a.length)continue;let hi=a.findIndex(r=>r.some(c=>norm(c).includes('OSAT')));if(hi<0)hi=0;let headers=a[hi].map(norm);let score=findCol(headers,['綜合評級（OSAT、Google、外送平台）','綜合評級','OSAT整體滿意度','整體滿意度']);let comment=findCol(headers,['OSAT整體滿意度評論','整體滿意度評論','OSAT評論']);let rest=findCol(headers,['餐廳_名稱','餐廳名稱','餐廳','Restaurant']);if(score>=0&&comment>=0&&rest>=0){best={a,hi,headers,score,comment,rest};break}}
+function repairSheetRef(ws){
+ // Power BI 匯出的 XLSX 可能把 dimension 錯寫成 A1；實際資料仍存在於工作表 XML。
+ // 重新用所有已解析儲存格計算範圍，避免 SheetJS 只讀到第一格。
+ const keys=Object.keys(ws).filter(k=>k[0]!=='!');
+ if(!keys.length)return;
+ let minR=Infinity,minC=Infinity,maxR=-1,maxC=-1;
+ for(const k of keys){try{const c=XLSX.utils.decode_cell(k);minR=Math.min(minR,c.r);minC=Math.min(minC,c.c);maxR=Math.max(maxR,c.r);maxC=Math.max(maxC,c.c)}catch{}}
+ if(maxR>=0)ws['!ref']=XLSX.utils.encode_range({s:{r:minR,c:minC},e:{r:maxR,c:maxC}});
+}
+function rowKey(r){return [r.date,r.restaurant,r.score,r.comment].map(norm).join('¦')}
+async function importFile(file){const data=await file.arrayBuffer();const wb=XLSX.read(data,{type:'array',cellDates:true});let best=null;for(const sn of wb.SheetNames){const ws=wb.Sheets[sn];repairSheetRef(ws);let a=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});if(!a.length)continue;let hi=a.findIndex(r=>r.some(c=>norm(c).includes('OSAT')));if(hi<0)hi=0;let headers=a[hi].map(norm);let score=findCol(headers,['綜合評級（OSAT、Google、外送平台）','綜合評級','OSAT整體滿意度','整體滿意度']);let comment=findCol(headers,['OSAT整體滿意度評論','整體滿意度評論','OSAT評論']);let rest=findCol(headers,['餐廳_名稱','餐廳名稱','餐廳','Restaurant']);if(score>=0&&comment>=0&&rest>=0){best={a,hi,headers,score,comment,rest};break}}
  if(!best)throw new Error('找不到必要欄位：餐廳、OSAT分數、OSAT整體滿意度評論。');
  const {a,hi,headers,score,comment,rest}=best;const date=findCol(headers,['日期','填寫時間','Survey Date','Date']);const center=findCol(headers,['中心','外送中心']);const group=findCol(headers,['Group','group']);const code=findCol(headers,['餐廳代碼','餐廳編號','Restaurant Code']);let month=detectMonth(a.slice(hi+1),date);if(!month)return;
  let rows=a.slice(hi+1).filter(r=>norm(r[rest])||num(r[score])!==null).map((r,i)=>{let sc=num(r[score]);let txt=norm(r[comment]);let c=classify(txt);return applyMapping({id:i+1,restaurant:norm(r[rest]),restaurant_code:code>=0?norm(r[code]):'',center:center>=0?norm(r[center]):'',group:group>=0?norm(r[group]):'',score:sc,comment:txt,isLow:sc!==null&&sc>=1&&sc<=3,hasComment:!!txt,main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,date:date>=0?norm(r[date]):''})});
- state.months[month]={file:file.name,rows};state.month=month;saveLocal();refreshMonthSelect();render();toast(`已匯入 ${month}：${rows.length.toLocaleString()} 筆`)}
+ // 同月份採逐筆去重：日期＋餐廳＋評分＋評論完全相同視為同一筆。
+ const previous=state.months[month]?.rows||[];
+ const seen=new Set(); const merged=[]; let duplicateCount=0;
+ for(const r of [...previous,...rows]){const k=rowKey(r);if(seen.has(k)){duplicateCount++;continue}seen.add(k);merged.push(r)}
+ const added=Math.max(0,merged.length-previous.length);
+ state.months[month]={file:file.name,rows:merged,version:APP_VERSION};state.month=month;saveLocal();refreshMonthSelect();render();
+ toast(`讀取 ${rows.length.toLocaleString()} 筆｜新增 ${added.toLocaleString()}｜重複排除 ${duplicateCount.toLocaleString()}`)}
 function current(){return state.months[state.month]?.rows||[]}function low(){return current().filter(r=>r.isLow)}function comments(){return low().filter(r=>r.hasComment)}
 function pct(a,b){return b?100*a/b:0}function fmtp(v){return `${v.toFixed(1)}%`}function esc(s){return norm(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function groupBy(arr,key){let m={};for(const r of arr){let k=typeof key==='function'?key(r):r[key];(m[k||'未對應']??=[]).push(r)}return m}
