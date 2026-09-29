@@ -1,4 +1,4 @@
-# KFC GES Dashboard v7.1
+# KFC GES Dashboard v7.4
 
 ## 本版新增
 - Supabase 為唯一資料保存來源。
@@ -11,8 +11,22 @@
 ## 更新步驟
 1. 先到 Supabase > SQL Editor 執行 `setup_supabase.sql`（可重複執行）。
 2. 將本資料夾全部檔案覆蓋 GitHub Pages 原檔。
-3. 右下角確認顯示 `GES Dashboard v7.1 · Supabase`。
+3. 右下角確認顯示 `GES Dashboard v7.4 · Supabase`。
 4. 在 080／4128分析頁分別匯入 080、4128、第三方訂單 Excel。
 
 ## 資料保存
 GES、080、4128、第三方訂單皆存 Supabase；瀏覽器不保存完整業務資料。
+
+
+## v7.4 修正
+- 080、4128、第三方訂單匯入前先讀取 Supabase 已存在的 row_hash。
+- 同一檔案內重複列與 Supabase 既有資料都會略過，不再因 unique constraint 出現 409。
+- 匯入後顯示「讀取 / 新增 / 重複排除」筆數。
+- setup_supabase.sql 補齊 anon 的 SELECT / INSERT 與 sequence 權限。
+
+
+## v7.4 修正
+- GES 改為每 1,000 筆分頁讀取 Supabase，避免 REST 單次 1,000 筆上限。
+- 月份選單由完整 GES 資料建立，M8 匯入後可正常顯示。
+- GES 重複檢查也改為分頁讀取，避免大量歷史資料時漏判。
+- 080/4128 與第三方訂單維持分頁讀取。
