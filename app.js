@@ -1,49 +1,105 @@
-const APP_VERSION='v4.0';
+const APP_VERSION='v6.1';
 const state={months:{},month:'',chart:null};
 const RESTAURANT_MAPPING = window.RESTAURANT_MAPPING || {};
+const CLASSIFICATION_OVERRIDES = window.CLASSIFICATION_OVERRIDES || {};
 function applyMapping(row){const m=RESTAURANT_MAPPING[norm(row.restaurant)];if(m){row.restaurant_code=row.restaurant_code||m.code||'';row.center=m.center||row.center||'';row.group=m.group||row.group||'';}else{row.center=row.center||'未對應';}return row;}
 const DIMENSION_ORDER=['速度','品質','正確性','其他'];
-const ISSUE_ORDER=['遲到/配送時效','餐點品質','包裝','漏餐','錯餐','服務','訂購/系統','多重問題/無明確主因','其他/不明確'];
-const ISSUE_DIMENSION={'遲到/配送時效':'速度','餐點品質':'品質','包裝':'品質','漏餐':'正確性','錯餐':'正確性','服務':'其他','訂購/系統':'其他','多重問題/無明確主因':'其他','其他/不明確':'其他','無評論':'其他'};
-const rules={
- '遲到/配送時效':['遲到','太慢','很慢','久等','等很久','等太久','一個小時','1小時','超時','送太久','時間太久','晚到'],
- '漏餐':['少了','少一','少送','漏餐','漏送','沒送','沒有附','沒附','缺少','缺了','漏掉'],
- '錯餐':['送錯','拿錯','錯餐','給錯','品項錯','口味錯','數量錯'],
- '餐點品質':['冷掉','冷的','不熱','難吃','乾','太油','不脆','品質','不好吃','軟掉','焦','生的','臭','不新鮮'],
- '包裝':['包裝','灑出','打翻','破掉','破損','湯汁','外漏','壓壞'],
- '服務':['態度','客服','外送員','服務','沒禮貌','不耐煩'],
- '訂購/系統':['app','系統','訂單','優惠','折扣','付款','無法下單','不能點','點餐']
+const ISSUE_ORDER=['遲到/配送時效','餐點品質','包裝/外觀','食安/異物','漏餐/缺品','錯餐/品項錯誤','外送交付','服務態度/處理','系統/訂購/優惠','價格/份量','多重問題/主因不明','其他/無法判斷'];
+const ISSUE_DIMENSION={
+ '遲到/配送時效':'速度',
+ '餐點品質':'品質','包裝/外觀':'品質','食安/異物':'品質',
+ '漏餐/缺品':'正確性','錯餐/品項錯誤':'正確性',
+ '外送交付':'其他','服務態度/處理':'其他','系統/訂購/優惠':'其他','價格/份量':'其他','多重問題/主因不明':'其他','其他/無法判斷':'其他','無評論':'其他'
 };
-const itemRules={飲料:['飲料','可樂','雪碧','紅茶','奶茶','咖啡'],蛋撻:['蛋撻','蛋塔'],薯條點心:['薯條','雞塊','點心','脆薯','薯餅'],炸雞主餐:['炸雞','雞腿','雞翅','漢堡','堡','捲','主餐','雞米花'],醬料:['醬','番茄醬','辣醬'],餐具用品:['吸管','餐具','紙巾','湯匙','叉子']};
-function norm(s){return String(s??'').trim()}function num(v){let n=Number(v);return Number.isFinite(n)?n:null}function hasAny(t,arr){return arr.some(k=>t.includes(k))}
+const rules={
+ '遲到/配送時效':['遲到','延遲','超時','太慢','很慢','慢了','慢到','久等','等很久','等太久','等待太久','等了一個','等了快','等了將近','等超過','一個多小時','一個小時','1小時','半個多小時','50分鐘','40分鐘','30分鐘','送太久','送很久','時間太久','時間過長','晚到','才送到','才拿到','追餐','預計時間','超過預定','超過時間'],
+ '漏餐/缺品':['少了','少一','少兩','少給','少送','漏餐','漏送','沒送','沒有送','沒有附','沒附','未附','缺少','缺了','漏掉','沒拿到','沒有拿到','沒收到','未收到','沒給','沒有給','忘了給','缺餐','送錯餐','送錯品','餐點送錯','拿錯','錯餐','給錯','品項錯','口味錯','數量錯','內容錯','做錯','不是我點','點A送B','錯誤餐點'],
+ '錯餐/品項錯誤':['__不使用__'],
+ '餐點品質':['沒氣','沒有氣','無氣','氣泡不足','像糖水','白開水','油耗味','冷掉','冷的','冷了','都冷','不熱','溫的','難吃','不好吃','很乾','太乾','柴','太油','油耗味','油味','不脆','軟掉','軟趴趴','濕軟','焦掉','焦黑','炸太久','炸過頭','生的','沒熟','臭','異味','不新鮮','口感','品質','味道','太鹹','太淡','太辣','變質','不好咬','硬'],
+ '包裝/外觀':['包裝','灑出','灑了','打翻','倒了','倒的','流出來','外漏','漏出','破掉','破損','壓壞','擠壓','散掉','湯汁','盒子開','袋子破'],
+ '食安/異物':['異物','頭髮','毛髮','蟲','蟑螂','蒼蠅','塑膠','鐵絲','發霉','酸掉'],
+ '外送交付':['送錯地方','送錯地址','放錯地方','找不到地址','沒有打電話','沒打電話','未聯絡','沒聯絡','放門口','送到別人','送錯地點','外送員找不到'],
+ '服務態度/處理':['態度','客服','服務','沒禮貌','不耐煩','口氣','電話沒人接','沒人接','無人接聽','不處理','沒有處理','處理方式','回覆','客訴','抱怨','通知'],
+ '系統/訂購/優惠':['app','APP','系統','無法下單','不能下單','不能點','點餐','訂購','訂餐','優惠券','優惠','折扣','付款','刷卡','發票','網站','網頁','會員','點數','兌換'],
+ '價格/份量':['太貴','很貴','價格','價錢','份量','太少','縮水','CP值','不划算']
+};
+const itemRules={飲料:['飲料','可樂','雪碧','紅茶','奶茶','咖啡','汽水'],蛋撻:['蛋撻','蛋塔'],薯條點心:['薯條','雞塊','點心','脆薯','薯餅','雞米花'],炸雞主餐:['炸雞','雞腿','雞翅','漢堡','堡','捲','主餐'],醬料:['醬','番茄醬','辣醬'],餐具用品:['吸管','餐具','紙巾','湯匙','叉子']};
+function norm(s){return String(s??'').trim()}
+function num(v){if(v===null||v===undefined||norm(v)==='')return null;let n=Number(v);return Number.isFinite(n)?n:null}
+function hasAny(t,arr){return arr.some(k=>t.includes(k))}
 function findCol(headers,terms){const h=headers.map(x=>norm(x));for(const t of terms){let i=h.findIndex(x=>x===t);if(i>=0)return i}for(const t of terms){let i=h.findIndex(x=>x.includes(t));if(i>=0)return i}return -1}
 function dimensionOf(main){return ISSUE_DIMENSION[main]||'其他'}
-function classify(text){text=norm(text);if(!text)return {main:'無評論',tags:[],items:[],confidence:'低'};let tags=[];for(const [k,ks] of Object.entries(rules))if(hasAny(text,ks))tags.push(k);let main='其他/不明確',confidence='低';if(tags.length===1){main=tags[0];confidence='高'}else if(tags.length>1){let explicit=null;for(const k of tags){const ks=rules[k];if(ks.some(w=>text.startsWith(w)||text.includes('因為'+w)||text.includes('最不能接受'+w))) {explicit=k;break}}main=explicit||'多重問題/無明確主因';confidence=explicit?'中':'低'}let items=[];if(tags.includes('漏餐'))for(const [k,ks] of Object.entries(itemRules))if(hasAny(text,ks))items.push(k);if(tags.includes('漏餐')&&!items.length)items=['未說明品項'];return {main,dimension:dimensionOf(main),tags,items,confidence}}
+function keywordHits(text,arr){let score=0;for(const k of arr){if(text.includes(k))score+=Math.max(1,Math.min(4,k.length/2));}return score}
+function classify(text){
+ text=norm(text);if(!text)return {main:'無評論',dimension:'其他',tags:[],items:[],confidence:'低'};
+ // 已人工檢視過的 M8 評論使用校正版，後續月份再走規則引擎。
+ let override=CLASSIFICATION_OVERRIDES[text];
+ let scores={},tags=[];
+ for(const [k,ks] of Object.entries(rules)){let sc=keywordHits(text,ks);if(sc>0){scores[k]=sc;tags.push(k)}}
+ let main='其他/無法判斷',confidence='低';
+ if(override){main=override;confidence='高';if(!tags.includes(main)&&rules[main])tags.unshift(main)}
+ else if(tags.length){
+   // 明確因果/強調語句提高主因權重。
+   for(const k of tags){for(const w of rules[k]){if(text.includes('因為'+w)||text.includes('主要是'+w)||text.includes('最不能接受'+w)||text.startsWith(w))scores[k]+=5}}
+   // 「就算了/還/結果」後方問題通常是顧客最後強調的不滿。
+   for(const cue of ['結果','還','竟然','就算了']){let pos=text.lastIndexOf(cue);if(pos>=0){let tail=text.slice(pos);for(const k of tags)if(hasAny(tail,rules[k]))scores[k]+=3}}
+   let ranked=Object.entries(scores).sort((a,b)=>b[1]-a[1]);main=ranked[0][0];confidence=ranked.length===1||ranked[0][1]>=ranked[1][1]+2?'高':'中';
+   if(ranked.length>1&&ranked[0][1]===ranked[1][1]&&text.length<18){main='多重問題/主因不明';confidence='低'}
+ }
+ let items=[];if(tags.includes('漏餐/缺品')||main==='漏餐/缺品')for(const [k,ks] of Object.entries(itemRules))if(hasAny(text,ks))items.push(k);if((tags.includes('漏餐/缺品')||main==='漏餐/缺品')&&!items.length)items=['未說明品項'];
+ return {main,dimension:dimensionOf(main),tags,items,confidence};
+}
+function stableDate(v){if(v instanceof Date&&!isNaN(v))return v.toISOString().slice(0,19);let s=norm(v);return s.replace(/\.000Z$/,'').replace(/Z$/,'')}
 function detectMonth(rows,dateIdx){for(const r of rows){let v=r[dateIdx];if(v instanceof Date&&!isNaN(v))return `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,'0')}`;if(typeof v==='number'&&window.XLSX){let d=XLSX.SSF.parse_date_code(v);if(d)return `${d.y}-${String(d.m).padStart(2,'0')}`;}let s=norm(v);let m=s.match(/(20\d{2})[\/\-.年](\d{1,2})/);if(m)return `${m[1]}-${m[2].padStart(2,'0')}`;}return prompt('無法從日期欄辨識月份，請輸入報告月份，例如 2026-09：','2026-09')||''}
-function loadLocal(){try{state.months=JSON.parse(localStorage.getItem('gesMonths')||'{}')}catch{};const ks=Object.keys(state.months).sort();if(ks.length){state.month=ks.at(-1);refreshMonthSelect();render()}}
+function loadLocal(){try{state.months=JSON.parse(localStorage.getItem('gesMonths')||'{}')}catch{};for(const m of Object.keys(state.months)){let seen=new Set(),clean=[];for(let r of (state.months[m].rows||[])){if(r.score===0||r.score===null||r.score===undefined)continue;let c=classify(r.comment);Object.assign(r,{main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,date:stableDate(r.date)});let k=rowKey(r);if(seen.has(k))continue;seen.add(k);clean.push(r)}state.months[m].rows=clean;state.months[m].version=APP_VERSION}saveLocal();const ks=Object.keys(state.months).sort();if(ks.length){state.month=ks.at(-1);refreshMonthSelect();render()}}
 function saveLocal(){localStorage.setItem('gesMonths',JSON.stringify(state.months))}
 function refreshMonthSelect(){const s=document.querySelector('#monthSelect');let ks=Object.keys(state.months).sort().reverse();s.innerHTML=ks.length?ks.map(m=>`<option ${m===state.month?'selected':''}>${m}</option>`).join(''):'<option value="">尚未匯入月份</option>'}
-function repairSheetRef(ws){
- // Power BI 匯出的 XLSX 可能把 dimension 錯寫成 A1；實際資料仍存在於工作表 XML。
- // 重新用所有已解析儲存格計算範圍，避免 SheetJS 只讀到第一格。
- const keys=Object.keys(ws).filter(k=>k[0]!=='!');
- if(!keys.length)return;
- let minR=Infinity,minC=Infinity,maxR=-1,maxC=-1;
- for(const k of keys){try{const c=XLSX.utils.decode_cell(k);minR=Math.min(minR,c.r);minC=Math.min(minC,c.c);maxR=Math.max(maxR,c.r);maxC=Math.max(maxC,c.c)}catch{}}
- if(maxR>=0)ws['!ref']=XLSX.utils.encode_range({s:{r:minR,c:minC},e:{r:maxR,c:maxC}});
+async function repairPowerBIWorkbook(arrayBuffer){
+ // Power BI 有些匯出檔把 worksheet dimension 寫成 A1，SheetJS 會因此只解析第一格。
+ // 必須在 XLSX.read 之前直接修正 worksheet XML，讀完後再修已經太晚。
+ if(!window.JSZip) return arrayBuffer;
+ const zip=await JSZip.loadAsync(arrayBuffer);
+ const names=Object.keys(zip.files).filter(n=>/^xl\/worksheets\/sheet\d+\.xml$/.test(n));
+ let changed=false;
+ for(const name of names){
+   let xml=await zip.file(name).async('string');
+   const refs=[...xml.matchAll(/<c\s+[^>]*r="([A-Z]+)(\d+)"/g)];
+   if(!refs.length) continue;
+   let maxRow=1,maxCol=1;
+   for(const m of refs){
+     maxRow=Math.max(maxRow,Number(m[2]));
+     let col=0; for(const ch of m[1]) col=col*26+(ch.charCodeAt(0)-64);
+     maxCol=Math.max(maxCol,col);
+   }
+   let colName=''; let n=maxCol; while(n){n--;colName=String.fromCharCode(65+(n%26))+colName;n=Math.floor(n/26)}
+   const ref=`A1:${colName}${maxRow}`;
+   if(/<dimension\s+ref="A1"\s*\/>/.test(xml)){xml=xml.replace(/<dimension\s+ref="A1"\s*\/>/,`<dimension ref="${ref}"/>`);changed=true}
+   else if(/<dimension\s+ref="[^"]+"\s*\/>/.test(xml)){
+     const old=(xml.match(/<dimension\s+ref="([^"]+)"/)||[])[1]||'';
+     if(old!==ref){xml=xml.replace(/<dimension\s+ref="[^"]+"\s*\/>/,`<dimension ref="${ref}"/>`);changed=true}
+   }
+   zip.file(name,xml);
+ }
+ return changed ? await zip.generateAsync({type:'arraybuffer',compression:'DEFLATE'}) : arrayBuffer;
 }
-function rowKey(r){return [r.date,r.restaurant,r.score,r.comment].map(norm).join('¦')}
-async function importFile(file){const data=await file.arrayBuffer();const wb=XLSX.read(data,{type:'array',cellDates:true});let best=null;for(const sn of wb.SheetNames){const ws=wb.Sheets[sn];repairSheetRef(ws);let a=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});if(!a.length)continue;let hi=a.findIndex(r=>r.some(c=>norm(c).includes('OSAT')));if(hi<0)hi=0;let headers=a[hi].map(norm);let score=findCol(headers,['綜合評級（OSAT、Google、外送平台）','綜合評級','OSAT整體滿意度','整體滿意度']);let comment=findCol(headers,['OSAT整體滿意度評論','整體滿意度評論','OSAT評論']);let rest=findCol(headers,['餐廳_名稱','餐廳名稱','餐廳','Restaurant']);if(score>=0&&comment>=0&&rest>=0){best={a,hi,headers,score,comment,rest};break}}
+function rowKey(r){return [stableDate(r.date),norm(r.restaurant),r.score===null?'':String(r.score),norm(r.comment)].join('¦')}
+async function importFile(file){const original=await file.arrayBuffer();const data=await repairPowerBIWorkbook(original);const wb=XLSX.read(data,{type:'array',cellDates:true});let best=null;for(const sn of wb.SheetNames){const ws=wb.Sheets[sn];let a=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});if(!a.length)continue;let hi=a.findIndex(r=>r.some(c=>norm(c).includes('OSAT')));if(hi<0)hi=0;let headers=a[hi].map(norm);let score=findCol(headers,['綜合評級（OSAT、Google、外送平台）','綜合評級','OSAT整體滿意度','整體滿意度']);let comment=findCol(headers,['OSAT整體滿意度評論','整體滿意度評論','OSAT評論']);let rest=findCol(headers,['餐廳_名稱','餐廳名稱','餐廳','Restaurant']);if(score>=0&&comment>=0&&rest>=0){best={a,hi,headers,score,comment,rest};break}}
  if(!best)throw new Error('找不到必要欄位：餐廳、OSAT分數、OSAT整體滿意度評論。');
  const {a,hi,headers,score,comment,rest}=best;const date=findCol(headers,['日期','填寫時間','Survey Date','Date']);const center=findCol(headers,['中心','外送中心']);const group=findCol(headers,['Group','group']);const code=findCol(headers,['餐廳代碼','餐廳編號','Restaurant Code']);let month=detectMonth(a.slice(hi+1),date);if(!month)return;
- let rows=a.slice(hi+1).filter(r=>norm(r[rest])||num(r[score])!==null).map((r,i)=>{let sc=num(r[score]);let txt=norm(r[comment]);let c=classify(txt);return applyMapping({id:i+1,restaurant:norm(r[rest]),restaurant_code:code>=0?norm(r[code]):'',center:center>=0?norm(r[center]):'',group:group>=0?norm(r[group]):'',score:sc,comment:txt,isLow:sc!==null&&sc>=1&&sc<=3,hasComment:!!txt,main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,date:date>=0?norm(r[date]):''})});
+ let rows=a.slice(hi+1).filter(r=>norm(r[rest])||num(r[score])!==null).map((r,i)=>{let sc=num(r[score]);let txt=norm(r[comment]);let c=classify(txt);return applyMapping({id:i+1,restaurant:norm(r[rest]),restaurant_code:code>=0?norm(r[code]):'',center:center>=0?norm(r[center]):'',group:group>=0?norm(r[group]):'',score:sc,comment:txt,isLow:sc!==null&&sc>=1&&sc<=3,hasComment:!!txt,main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,date:date>=0?stableDate(r[date]):''})});
  // 同月份採逐筆去重：日期＋餐廳＋評分＋評論完全相同視為同一筆。
- const previous=state.months[month]?.rows||[];
+ let previous=state.months[month]?.rows||[];
+ // 自動淘汰舊版解析錯誤留下的 1 筆資料。
+ if((state.months[month]?.version||'')!==APP_VERSION && previous.length<=1 && rows.length>1) previous=[];
  const seen=new Set(); const merged=[]; let duplicateCount=0;
  for(const r of [...previous,...rows]){const k=rowKey(r);if(seen.has(k)){duplicateCount++;continue}seen.add(k);merged.push(r)}
  const added=Math.max(0,merged.length-previous.length);
  state.months[month]={file:file.name,rows:merged,version:APP_VERSION};state.month=month;saveLocal();refreshMonthSelect();render();
- toast(`讀取 ${rows.length.toLocaleString()} 筆｜新增 ${added.toLocaleString()}｜重複排除 ${duplicateCount.toLocaleString()}`)}
+ const valid=rows.filter(r=>r.score!==null).length, lowN=rows.filter(r=>r.isLow).length, oneN=rows.filter(r=>r.score===1).length;
+ const mapped=rows.filter(r=>r.center&&r.center!=='未對應').length, unmapped=rows.length-mapped;
+ showImportCheck({read:rows.length,valid,low:lowN,one:oneN,mapped,unmapped,added,duplicateCount,file:file.name});
+ toast(`成功解析 ${rows.length.toLocaleString()} 筆｜新增 ${added.toLocaleString()}｜重複排除 ${duplicateCount.toLocaleString()}`)}
+function showImportCheck(x){const e=document.querySelector('#importCheck');if(!e)return;e.style.display='block';e.innerHTML=`<h3>匯入檢查｜${esc(x.file)}</h3><div class="kpi-grid">${kpi('成功解析',x.read.toLocaleString(),'Excel資料列')}${kpi('有效評分',x.valid.toLocaleString(),'應與問卷筆數一致')}${kpi('1～3分',x.low.toLocaleString(),'低分資料')}${kpi('1分',x.one.toLocaleString(),'嚴重低分')}${kpi('Mapping成功',x.mapped.toLocaleString(),`未對應 ${x.unmapped.toLocaleString()} 筆`)}${kpi('重複排除',x.duplicateCount.toLocaleString(),`新增 ${x.added.toLocaleString()} 筆`)}</div>`}
 function current(){return state.months[state.month]?.rows||[]}function low(){return current().filter(r=>r.isLow)}function comments(){return low().filter(r=>r.hasComment)}
 function pct(a,b){return b?100*a/b:0}function fmtp(v){return `${v.toFixed(1)}%`}function esc(s){return norm(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function groupBy(arr,key){let m={};for(const r of arr){let k=typeof key==='function'?key(r):r[key];(m[k||'未對應']??=[]).push(r)}return m}

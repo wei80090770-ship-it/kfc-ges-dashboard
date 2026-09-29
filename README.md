@@ -1,18 +1,8 @@
-# KFC GES Dashboard
+# KFC GES Dashboard v6.1
 
-第一版功能：每月匯入 GES Excel，在瀏覽器中分析市場 → 中心 → 餐廳、主要不滿、漏餐與改善趨勢。
-
-## GitHub Pages
-1. 將本資料夾全部檔案上傳到 repository 根目錄。
-2. GitHub → Settings → Pages。
-3. Build and deployment 選 `Deploy from a branch`。
-4. Branch 選 `main` / `(root)` → Save。
-
-## 第一版資料保存
-目前歷史月份使用瀏覽器 localStorage，先用來驗證版面與分類規則。換電腦/清除瀏覽器資料不會保留。
-Supabase 已建立，但正式串接前需先設定安全的 RLS Policy；不要把 Database password 或 service_role key 放進 GitHub。
-
-## Excel 必要欄位
-系統會自動嘗試辨識：餐廳名稱、OSAT 整體滿意度分數、OSAT整體滿意度評論、日期；若 Excel 已含中心/Group 也會讀取。
-
-> 下一階段：串接 Supabase restaurant_mapping、保存歷史月份、加入 080 分析。
+修正項目：
+- 修正 Power BI Excel 空白列被判成 0 分，避免 2,666 變成 2,667、371 變成 372。
+- 啟動時自動清理舊版 localStorage 的重複資料與無效 0 分資料。
+- 重複上傳以 日期＋餐廳＋評分＋評論 的穩定鍵去重。
+- GES 主因改為外送三大構面：速度、品質、正確性；其他問題再拆服務、系統/優惠、外送交付、價格/份量、無法判斷。
+- M8 已人工校正的低分評論內建為分類基準；新月份使用擴充後的中文規則引擎。
