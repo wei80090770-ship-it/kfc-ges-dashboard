@@ -15,7 +15,7 @@
   <div class="top-actions"><select id="monthSelect"><option value="">尚未匯入月份</option></select><button id="importBtn" class="primary">匯入 GES Excel</button><input id="fileInput" type="file" accept=".xlsx,.xls,.csv" hidden /></div>
 </header>
 <nav class="tabs" id="tabs">
-  <button class="tab active" data-page="market">市場總覽</button><button class="tab" data-page="center">中心分析</button><button class="tab" data-page="restaurant">重點餐廳</button><button class="tab" data-page="issue">問題分析</button><button class="tab" data-page="missing">漏餐分析</button><button class="tab" data-page="comments">評論明細</button><button class="tab" data-page="trend">改善追蹤</button><button class="tab disabled" title="下一階段">080分析</button>
+  <button class="tab active" data-page="market">市場總覽</button><button class="tab" data-page="center">中心分析</button><button class="tab" data-page="restaurant">重點餐廳</button><button class="tab" data-page="issue">問題分析</button><button class="tab" data-page="missing">漏餐分析</button><button class="tab" data-page="comments">評論明細</button><button class="tab" data-page="trend">改善追蹤</button><button class="tab" data-page="complaints">080／4128分析</button>
 </nav>
 <main>
   <section id="market" class="page active"><div class="page-title"><div><h1>市場總覽</h1><p>先看全市場方向，再往中心與餐廳追蹤。</p></div><span id="dataStatus" class="pill">尚未匯入資料</span></div><div id="kpis" class="kpi-grid"></div><div id="importCheck" class="card" style="display:none;margin-bottom:18px"></div><div class="grid2"><div class="card"><h3>外送三大構面</h3><canvas id="issueChart"></canvas></div><div class="card"><h3>市場 Finding</h3><div id="finding" class="finding empty">匯入當月 GES Excel 後自動產生。</div></div></div><div class="card"><h3>六中心比較</h3><div id="centerTable"></div></div></section>
@@ -25,9 +25,10 @@
   <section id="missing" class="page"><div class="page-title"><div><h1>漏餐分析</h1><p>可依全市場／各中心篩選，依漏餐筆數或漏餐率排名，並追蹤實際漏品與原始評論。</p></div></div><div class="filters page-filters"><label>中心 <select class="global-center-filter"><option value="">全市場</option></select></label></div><div id="missingContent"></div></section>
   <section id="comments" class="page"><div class="page-title"><div><h1>評論明細</h1><p>保留原始評論，方便會議追問時回查。</p></div><button id="exportBtn">匯出目前分析</button></div><div class="filters"><label>中心 <select class="global-center-filter"><option value="">全市場</option></select></label><select id="filterIssue"><option value="">全部主因</option></select><input id="filterText" placeholder="搜尋餐廳或評論" /></div><div id="commentsTable"></div></section>
   <section id="trend" class="page"><div class="page-title"><div><h1>改善追蹤</h1><p>每月匯入後自動比較本月與上月。</p></div></div><div class="filters page-filters"><label>中心 <select class="global-center-filter"><option value="">全市場</option></select></label></div><div id="trendContent" class="card empty">至少匯入兩個月份後，即可比較改善、持續異常與惡化餐廳。</div></section>
+  <section id="complaints" class="page"><div class="page-title"><div><h1>080／4128 客訴分析</h1><p>080 與 4128 分開統計；4128 全部視為外送客訴，遲到案件再與第三方訂單比對。</p></div></div><div class="filters page-filters"><label>來源 <select id="complaintSource"><option value="all">080＋4128</option><option value="080">080</option><option value="4128">4128</option></select></label><label>中心 <select id="complaintCenter"><option value="">全市場</option></select></label><button id="import080Btn">匯入 080 Excel</button><button id="import4128Btn">匯入 4128 Excel</button><button id="import3rdBtn">匯入第三方訂單</button><input id="file080" type="file" accept=".xlsx,.xls,.csv" hidden /><input id="file4128" type="file" accept=".xlsx,.xls,.csv" hidden /><input id="file3rd" type="file" accept=".xlsx,.xls,.csv" hidden /></div><div id="complaintContent" class="card empty">請先匯入 080／4128 資料。</div></section>
 </main>
 <div id="toast" class="toast"></div>
-<div style="text-align:right;padding:8px 18px 18px;color:#7b8794;font-size:12px">GES Dashboard v7.0 · Supabase</div>
+<div style="text-align:right;padding:8px 18px 18px;color:#7b8794;font-size:12px">GES Dashboard v7.1 · Supabase</div>
 <script src="mapping.js"></script>
 <script src="classification_overrides.js"></script>
 <script src="app.js"></script>

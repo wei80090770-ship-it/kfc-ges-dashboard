@@ -1,17 +1,18 @@
-# KFC GES Dashboard v7.0
+# KFC GES Dashboard v7.1
 
-## 架構
-- GitHub Pages：只放網頁程式
-- Supabase `ges_responses`：GES 明細唯一保存來源
-- 瀏覽器不再保存完整 GES 問卷
-- 同一筆資料以「日期＋餐廳＋分數＋評論」SHA-256 去重
+## 本版新增
+- Supabase 為唯一資料保存來源。
+- 新增 080／4128 客訴分析頁。
+- 4128 全部視為外送客訴；「投訴餐廳人員／投訴外送人員」保留作責任歸屬，不用來判斷是否外送。
+- 可匯入第三方訂單資料；4128 的遲到案件與第三方訂單配對成功時，標示「第三方遲到」。對不到則視為非第三方。
+- 不計算 080/4128 ÷ TC，占比由使用者自行以正式 TC 計算。
+- GES 問題分析新增「需改善日期」與「需改善時段」。若 GES 原始日期沒有時間，只顯示日期，不臆測時段。
 
-## 第一次上線
-1. Supabase → SQL Editor → New query。
-2. 貼上 `setup_supabase.sql` 全部內容並 Run。
-3. GitHub 將本 ZIP 內所有檔案覆蓋原版本。
-4. 開啟 Dashboard，右下角應顯示 `GES Dashboard v7.0 · Supabase`。
-5. 第一次請重新匯入既有 GES Excel；之後重新整理或換電腦都會由 Supabase 載入。
+## 更新步驟
+1. 先到 Supabase > SQL Editor 執行 `setup_supabase.sql`（可重複執行）。
+2. 將本資料夾全部檔案覆蓋 GitHub Pages 原檔。
+3. 右下角確認顯示 `GES Dashboard v7.1 · Supabase`。
+4. 在 080／4128分析頁分別匯入 080、4128、第三方訂單 Excel。
 
-## 安全
-v7.0 因尚未做登入，只允許 anon 讀取與新增，不允許修改/刪除。Publishable key 可放前端；不要把 Secret/service_role key 放到 GitHub。
+## 資料保存
+GES、080、4128、第三方訂單皆存 Supabase；瀏覽器不保存完整業務資料。
