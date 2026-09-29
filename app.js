@@ -1,4 +1,7 @@
-const APP_VERSION='v6.4';
+const APP_VERSION='v7.0';
+const SUPABASE_URL='https://piccgvophhtnmggwwobn.supabase.co';
+const SUPABASE_KEY='sb_publishable_2SPa8TbrgAhbglUKdk3VGg_9DvRriFP';
+const GES_TABLE='ges_responses';
 const state={months:{},month:'',chart:null,globalCenter:'',restaurantRank:'low',missingRank:'count'};
 const RESTAURANT_MAPPING = window.RESTAURANT_MAPPING || {};
 const CLASSIFICATION_OVERRIDES = window.CLASSIFICATION_OVERRIDES || {};
@@ -51,26 +54,33 @@ function classify(text){
 }
 function stableDate(v){if(v instanceof Date&&!isNaN(v))return v.toISOString().slice(0,19);let s=norm(v);return s.replace(/\.000Z$/,'').replace(/Z$/,'')}
 function detectMonth(rows,dateIdx){for(const r of rows){let v=r[dateIdx];if(v instanceof Date&&!isNaN(v))return `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,'0')}`;if(typeof v==='number'&&window.XLSX){let d=XLSX.SSF.parse_date_code(v);if(d)return `${d.y}-${String(d.m).padStart(2,'0')}`;}let s=norm(v);let m=s.match(/(20\d{2})[\/\-.年](\d{1,2})/);if(m)return `${m[1]}-${m[2].padStart(2,'0')}`;}return prompt('無法從日期欄辨識月份，請輸入報告月份，例如 2026-09：','2026-09')||''}
-const DB_NAME='kfcGesDashboardDB';
-const DB_STORE='state';
-function openDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(DB_NAME,1);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(DB_STORE))db.createObjectStore(DB_STORE)};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
-async function dbGet(key){const db=await openDB();return new Promise((resolve,reject)=>{const tx=db.transaction(DB_STORE,'readonly'),req=tx.objectStore(DB_STORE).get(key);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
-async function dbSet(key,value){const db=await openDB();return new Promise((resolve,reject)=>{const tx=db.transaction(DB_STORE,'readwrite');tx.objectStore(DB_STORE).put(value,key);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error)})}
-function normalizeStoredMonths(months){months=months&&typeof months==='object'?months:{};for(const m of Object.keys(months)){let seen=new Set(),clean=[];for(let r of (months[m].rows||[])){if(r.score===0||r.score===null||r.score===undefined)continue;applyMapping(r);let c=classify(r.comment);Object.assign(r,{isLow:r.score>=1&&r.score<=3,hasComment:!!norm(r.comment),main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,date:stableDate(r.date)});let k=rowKey(r);if(seen.has(k))continue;seen.add(k);clean.push(r)}months[m].rows=clean;months[m].version=APP_VERSION}return months}
-async function loadLocal(){
- let stored=null;
- try{stored=await dbGet('months')}catch(e){console.warn('IndexedDB讀取失敗',e)}
- // 舊版 localStorage 自動搬移到 IndexedDB，避免升版後歷史資料消失。
- if(!stored){try{const legacy=JSON.parse(localStorage.getItem('gesMonths')||'{}');if(Object.keys(legacy).length)stored=legacy}catch(e){console.warn('舊資料讀取失敗',e)}}
- state.months=normalizeStoredMonths(stored||{});
- try{state.globalCenter=(await dbGet('globalCenter'))||localStorage.getItem('gesGlobalCenter')||''}catch{}
- const ks=Object.keys(state.months).sort();
- if(ks.length){state.month=ks.at(-1);refreshMonthSelect();render();await saveLocal()}else{refreshMonthSelect();render()}
+async function api(path,options={}){
+ const headers={apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json',...(options.headers||{})};
+ const res=await fetch(`${SUPABASE_URL}/rest/v1/${path}`,{...options,headers});
+ if(!res.ok){let msg=await res.text();throw new Error(`Supabase ${res.status}: ${msg}`)}
+ if(res.status===204)return null; const txt=await res.text(); return txt?JSON.parse(txt):null;
 }
-async function saveLocal(){
- try{await dbSet('months',state.months);await dbSet('globalCenter',state.globalCenter)}catch(e){console.error('資料保存失敗',e);throw new Error('瀏覽器資料保存失敗，請確認沒有使用無痕模式或封鎖網站儲存空間。')}
- // 小型設定仍保留 localStorage；GES 明細改用 IndexedDB，避免 localStorage 容量限制。
- try{localStorage.setItem('gesGlobalCenter',state.globalCenter)}catch{}
+async function sha256(text){const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('')}
+async function loadCloud(){
+ try{
+   document.querySelector('#dataStatus').textContent='正在讀取 Supabase…';
+   const data=await api(`${GES_TABLE}?select=report_month,payload&payload=not.is.null&order=report_month.asc&limit=20000`);
+   state.months={};
+   for(const x of (data||[])){
+     const m=x.report_month||x.payload?.month||''; if(!m||!x.payload)continue;
+     const r=x.payload; let c=classify(r.comment);Object.assign(r,{main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,date:stableDate(r.date)});applyMapping(r);
+     (state.months[m]??={file:'Supabase',rows:[],version:APP_VERSION}).rows.push(r);
+   }
+   for(const m of Object.keys(state.months)){const seen=new Set();state.months[m].rows=state.months[m].rows.filter(r=>{const k=rowKey(r);if(seen.has(k))return false;seen.add(k);return r.score!==0&&r.score!==null&&r.score!==undefined})}
+   const ks=Object.keys(state.months).sort(); state.month=ks.at(-1)||''; refreshMonthSelect(); render();
+ }catch(err){console.error(err);document.querySelector('#dataStatus').textContent='Supabase 連線失敗';alert('Supabase 讀取失敗。請先執行 ZIP 內 setup_supabase.sql。\n\n'+err.message)}
+}
+async function saveRowsToCloud(month,file,rows){
+ const existing=await api(`${GES_TABLE}?select=row_hash&report_month=eq.${encodeURIComponent(month)}&limit=20000`);
+ const seen=new Set((existing||[]).map(x=>x.row_hash)); const batch=[]; let duplicateCount=0;
+ for(const r of rows){const h=await sha256(rowKey(r));if(seen.has(h)){duplicateCount++;continue}seen.add(h);batch.push({report_month:month,row_hash:h,source_file:file,payload:{...r,month}})}
+ for(let i=0;i<batch.length;i+=500){await api(GES_TABLE,{method:'POST',headers:{Prefer:'return=minimal,resolution=ignore-duplicates'},body:JSON.stringify(batch.slice(i,i+500))})}
+ return {added:batch.length,duplicateCount};
 }
 function refreshMonthSelect(){const s=document.querySelector('#monthSelect');let ks=Object.keys(state.months).sort().reverse();s.innerHTML=ks.length?ks.map(m=>`<option ${m===state.month?'selected':''}>${m}</option>`).join(''):'<option value="">尚未匯入月份</option>'}
 async function repairPowerBIWorkbook(arrayBuffer){
@@ -107,13 +117,8 @@ async function importFile(file){const original=await file.arrayBuffer();const da
  const {a,hi,headers,score,comment,rest}=best;const date=findCol(headers,['日期','填寫時間','Survey Date','Date']);const center=findCol(headers,['中心','外送中心']);const group=findCol(headers,['Group','group']);const code=findCol(headers,['餐廳代碼','餐廳編號','Restaurant Code']);let month=detectMonth(a.slice(hi+1),date);if(!month)return;
  let rows=a.slice(hi+1).filter(r=>norm(r[rest])||num(r[score])!==null).map((r,i)=>{let sc=num(r[score]);let txt=norm(r[comment]);let c=classify(txt);return applyMapping({id:i+1,restaurant:norm(r[rest]),restaurant_code:code>=0?norm(r[code]):'',center:center>=0?norm(r[center]):'',group:group>=0?norm(r[group]):'',score:sc,comment:txt,isLow:sc!==null&&sc>=1&&sc<=3,hasComment:!!txt,main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,date:date>=0?stableDate(r[date]):''})});
  // 同月份採逐筆去重：日期＋餐廳＋評分＋評論完全相同視為同一筆。
- let previous=state.months[month]?.rows||[];
- // 自動淘汰舊版解析錯誤留下的 1 筆資料。
- if((state.months[month]?.version||'')!==APP_VERSION && previous.length<=1 && rows.length>1) previous=[];
- const seen=new Set(); const merged=[]; let duplicateCount=0;
- for(const r of [...previous,...rows]){const k=rowKey(r);if(seen.has(k)){duplicateCount++;continue}seen.add(k);merged.push(r)}
- const added=Math.max(0,merged.length-previous.length);
- state.months[month]={file:file.name,rows:merged,version:APP_VERSION};state.month=month;await saveLocal();refreshMonthSelect();render();
+ const saved=await saveRowsToCloud(month,file.name,rows); const added=saved.added, duplicateCount=saved.duplicateCount;
+ await loadCloud(); state.month=month; refreshMonthSelect(); render();
  const valid=rows.filter(r=>r.score!==null).length, lowN=rows.filter(r=>r.isLow).length, oneN=rows.filter(r=>r.score===1).length;
  const mapped=rows.filter(r=>r.center&&r.center!=='未對應').length, unmapped=rows.length-mapped;
  showImportCheck({read:rows.length,valid,low:lowN,one:oneN,mapped,unmapped,added,duplicateCount,file:file.name});
@@ -122,7 +127,7 @@ function showImportCheck(x){const e=document.querySelector('#importCheck');if(!e
 function current(){return state.months[state.month]?.rows||[]}function low(){return current().filter(r=>r.isLow)}function comments(){return low().filter(r=>r.hasComment)}
 function centerFiltered(rows){return state.globalCenter?rows.filter(r=>(r.center||'未對應')===state.globalCenter):rows}
 function availableCenters(){return [...new Set(current().map(r=>r.center||'未對應'))].filter(Boolean).sort()}
-function syncGlobalCenterFilters(){const opts='<option value="">全市場</option>'+availableCenters().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');document.querySelectorAll('.global-center-filter').forEach(s=>{s.innerHTML=opts;s.value=state.globalCenter;s.onchange=e=>{state.globalCenter=e.target.value;render();saveLocal().catch(err=>toast(err.message));}})}
+function syncGlobalCenterFilters(){const opts='<option value="">全市場</option>'+availableCenters().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');document.querySelectorAll('.global-center-filter').forEach(s=>{s.innerHTML=opts;s.value=state.globalCenter;s.onchange=e=>{state.globalCenter=e.target.value;render();}})}
 function pct(a,b){return b?100*a/b:0}function fmtp(v){return `${v.toFixed(1)}%`}function esc(s){return norm(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function groupBy(arr,key){let m={};for(const r of arr){let k=typeof key==='function'?key(r):r[key];(m[k||'未對應']??=[]).push(r)}return m}
 function kpi(label,value,note=''){return `<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="note">${note}</div></div>`}
@@ -165,4 +170,4 @@ function renderTrend(){let ks=Object.keys(state.months).sort(),idx=ks.indexOf(st
 function table(headers,rows){return `<table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(r=>`<tr>${r.map((c,i)=>`<td>${esc(c)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${headers.length}" class="empty">目前沒有資料</td></tr>`}</tbody></table>`}
 function exportAnalysis(){let rs=restaurantStats(current()),co=comments();let wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rs),'餐廳分析');XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(co.map(r=>({中心:r.center,Group:r.group,餐廳:r.restaurant,分數:r.score,主要構面:r.dimension||dimensionOf(r.main),主要不滿:r.main,問題標籤:r.tags.join('、'),漏餐品項:r.items.join('、'),評論:r.comment}))),'評論明細');XLSX.writeFile(wb,`GES分析_${state.month||'未指定'}.xlsx`)}
 function toast(t){let e=document.querySelector('#toast');e.textContent=t;e.style.display='block';setTimeout(()=>e.style.display='none',2600)}
-document.querySelector('#importBtn').onclick=()=>document.querySelector('#fileInput').click();document.querySelector('#fileInput').onchange=e=>e.target.files[0]&&importFile(e.target.files[0]).catch(err=>alert(err.message));document.querySelector('#monthSelect').onchange=e=>{state.month=e.target.value;render()};document.querySelectorAll('.tab:not(.disabled)').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelector('#'+b.dataset.page).classList.add('active')});document.querySelector('#filterIssue').onchange=renderComments;document.querySelector('#restaurantRank').onchange=e=>{state.restaurantRank=e.target.value;renderRestaurants(current())};document.querySelector('#filterText').oninput=renderComments;document.querySelector('#exportBtn').onclick=exportAnalysis;loadLocal().catch(err=>{console.error(err);alert('載入已儲存資料失敗：'+err.message)});
+document.querySelector('#importBtn').onclick=()=>document.querySelector('#fileInput').click();document.querySelector('#fileInput').onchange=e=>e.target.files[0]&&importFile(e.target.files[0]).catch(err=>alert(err.message));document.querySelector('#monthSelect').onchange=e=>{state.month=e.target.value;render()};document.querySelectorAll('.tab:not(.disabled)').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelector('#'+b.dataset.page).classList.add('active')});document.querySelector('#filterIssue').onchange=renderComments;document.querySelector('#restaurantRank').onchange=e=>{state.restaurantRank=e.target.value;renderRestaurants(current())};document.querySelector('#filterText').oninput=renderComments;document.querySelector('#exportBtn').onclick=exportAnalysis;loadCloud();
