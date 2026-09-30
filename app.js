@@ -1,4 +1,4 @@
-const APP_VERSION='v8.5';
+const APP_VERSION='v8.6';
 const SUPABASE_URL='https://piccgvophhtnmggwwobn.supabase.co';
 const SUPABASE_KEY='sb_publishable_2SPa8TbrgAhbglUKdk3VGg_9DvRriFP';
 const GES_TABLE='ges_responses';
@@ -38,7 +38,12 @@ function findCol(headers,terms){const h=headers.map(x=>norm(x));for(const t of t
 function dimensionOf(main){return ISSUE_DIMENSION[main]||'其他'}
 function keywordHits(text,arr){let score=0;for(const k of arr){if(text.includes(k))score+=Math.max(1,Math.min(6,k.length/2));}return score}
 function classify(text){
- text=norm(text);if(!text)return {main:'無評論',dimension:'其他',tags:[],items:[],confidence:'低'};
+ text=norm(text);if(!text)return {main:'無評論',dimension:'其他',tags:[],items:[],confidence:'低',positiveOnly:false};
+ // 先辨識「純正向」評論。低分問卷仍保留在問卷母數，但不列入問題分析。
+ const positiveRe=/(很滿意|非常滿意|滿意|很好|很棒|很讚|很親切|很有禮貌|態度佳|態度很好|服務很好|服務很棒|效率很棒|送餐很快|外送快速|準時送達|準時到達|準時抵達|提早且準時|餐點好吃|很好吃|美味|優質|nice|great|good service|still hot)/i;
+ const negativeRe=/(不滿|失望|不好|很差|太差|爛|遲到|延遲|延誤|超時|晚到|太慢|很慢|等很久|等太久|冷掉|不熱|難吃|油耗|沒氣|乾柴|很乾|太乾|不脆|軟掉|漏餐|漏送|少送|少給|缺少|缺餐|沒附|未附|沒有附|沒給|未給|送錯|品項錯|口味錯|數量錯|灑|撒|漏出|外漏|打翻|破損|壓壞|擠壓|態度差|不耐煩|沒通知|未通知|沒告知|未告知|找不到|送錯地址|系統問題|無法下單|優惠.*問題|太貴|份量.*少|縮水|變小|很小|異物|毛髮|沒熟|水瀉)/i;
+ const positiveOnly=positiveRe.test(text)&&!negativeRe.test(text);
+ if(positiveOnly)return {main:'正向意見',dimension:'正向意見',tags:[],items:[],confidence:'高',positiveOnly:true};
  let override=CLASSIFICATION_OVERRIDES[text];
  let scores={},tags=[];
  for(const [k,ks] of Object.entries(rules)){let sc=keywordHits(text,ks);if(sc>0){scores[k]=sc;tags.push(k)}}
@@ -55,19 +60,19 @@ function classify(text){
  if(/(外送員|客服|店員|人員).{0,16}(態度|沒禮貌|不耐煩|口氣|不處理|沒回|未回|沒通知|未通知)/i.test(text))addStrong('服務態度/處理',12);
  if(/(找不到地址|找不到位置|送錯地址|送錯地方|放錯地方|丟在.*門口|沒打電話|沒有打電話|不看備註)/i.test(text))addStrong('外送交付',13);
  if(/(冷掉|不熱|難吃|油耗味|沒氣|沒有氣|不脆|軟掉|乾柴|太乾|焦黑|異味|雞腥味|不入味|口感.*(差|不好)|美味程度不足)/i.test(text))addStrong('餐點品質',11);
- if(/(份量.*(少|不足)|縮水|少得離譜|太貴|價格.*(高|貴)|變小)/i.test(text))addStrong('價格/份量',12);
+ if(/(份量.*(少|不足)|縮水|少得離譜|太貴|價格.*(高|貴)|變小|雞塊.{0,4}(很小|太小)|餐點.{0,4}(很小|太小))/i.test(text))addStrong('價格/份量',12);
  let main='其他/無法判斷',confidence='低';
- if(override){main=override;confidence='高';if(!tags.includes(main)&&rules[main])tags.unshift(main)}
- else if(tags.length){
+ // v8.6 以新版語意規則優先；舊 override 只在新版完全沒有辨識結果時補位，避免舊分類鎖死錯誤。
+ if(tags.length){
    for(const k of tags){for(const w of (rules[k]||[])){if(text.includes('因為'+w)||text.includes('主要是'+w)||text.includes('最不能接受'+w)||text.startsWith(w))scores[k]=(scores[k]||0)+5}}
    for(const cue of ['結果','竟然','就算了','重點是','最不能接受']){let pos=text.lastIndexOf(cue);if(pos>=0){let tail=text.slice(pos);for(const k of tags)if(hasAny(tail,rules[k]||[]))scores[k]=(scores[k]||0)+3}}
    let ranked=Object.entries(scores).sort((a,b)=>b[1]-a[1]);main=ranked[0][0];confidence=strong.includes(main)||ranked.length===1||ranked[0][1]>=ranked[1][1]+4?'高':'中';
    if(ranked.length>1&&ranked[0][1]===ranked[1][1]&&!strong.length&&text.length<18){main='多重問題/主因不明';confidence='低'}
- }
+ } else if(override && override!=='其他/無法判斷'){main=override;confidence='中';if(rules[main])tags.push(main)}
  // 正向文字本身不應成為負面主因；只有正向詞且沒有具體問題時保留無法判斷。
  if(/(準時送達|送餐很快|外送快速|態度非常好|服務很好|很滿意)/i.test(text)&&tags.length===1&&['遲到/配送時效','服務態度/處理'].includes(main)){main='其他/無法判斷';confidence='低'}
  let items=[];if(tags.includes('漏餐/缺品')||tags.includes('錯餐/品項錯誤')||['漏餐/缺品','錯餐/品項錯誤'].includes(main))for(const [k,ks] of Object.entries(itemRules))if(hasAny(text,ks))items.push(k);if((tags.includes('漏餐/缺品')||tags.includes('錯餐/品項錯誤')||['漏餐/缺品','錯餐/品項錯誤'].includes(main))&&!items.length)items=['未說明品項'];
- return {main,dimension:dimensionOf(main),tags,items,confidence};
+ return {main,dimension:dimensionOf(main),tags,items,confidence,positiveOnly:false};
 }
 function stableDate(v){if(v instanceof Date&&!isNaN(v))return v.toISOString().slice(0,19);let s=norm(v);return s.replace(/\.000Z$/,'').replace(/Z$/,'')}
 function detectMonth(rows,dateIdx){for(const r of rows){let v=r[dateIdx];if(v instanceof Date&&!isNaN(v))return `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,'0')}`;if(typeof v==='number'&&window.XLSX){let d=XLSX.SSF.parse_date_code(v);if(d)return `${d.y}-${String(d.m).padStart(2,'0')}`;}let s=norm(v);let m=s.match(/(20\d{2})[\/\-.年](\d{1,2})/);if(m)return `${m[1]}-${m[2].padStart(2,'0')}`;}return prompt('無法從日期欄辨識月份，請輸入報告月份，例如 2026-09：','2026-09')||''}
@@ -91,7 +96,7 @@ async function loadCloud(preferredMonth=''){
      const data=await fetchAllWhere(GES_TABLE,'id,report_month,payload',`report_month=eq.${encodeURIComponent(month)}`);
      for(const x of (data||[])){
        const m=x.report_month||x.payload?.month||''; if(!m||!x.payload)continue;
-       const r=x.payload; let c=classify(r.comment);Object.assign(r,{main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,date:stableDate(r.date)});applyMapping(r);
+       const r=x.payload; let c=classify(r.comment);Object.assign(r,{main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,positiveOnly:!!c.positiveOnly,date:stableDate(r.date)});applyMapping(r);
        (state.months[m]??={file:'Supabase',rows:[],version:APP_VERSION}).rows.push(r);
      }
      for(const m of Object.keys(state.months)){const seen=new Set();state.months[m].rows=state.months[m].rows.filter(r=>{const k=rowKey(r);if(seen.has(k))return false;seen.add(k);return r.score!==0&&r.score!==null&&r.score!==undefined})}
@@ -139,7 +144,7 @@ function rowKey(r){return [stableDate(r.date),norm(r.restaurant),r.score===null?
 async function importFile(file){const original=await file.arrayBuffer();const data=await repairPowerBIWorkbook(original);const wb=XLSX.read(data,{type:'array',cellDates:true});let best=null;for(const sn of wb.SheetNames){const ws=wb.Sheets[sn];let a=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});if(!a.length)continue;let hi=a.findIndex(r=>r.some(c=>norm(c).includes('OSAT')));if(hi<0)hi=0;let headers=a[hi].map(norm);let score=findCol(headers,['綜合評級（OSAT、Google、外送平台）','綜合評級','OSAT整體滿意度','整體滿意度']);let comment=findCol(headers,['OSAT整體滿意度評論','整體滿意度評論','OSAT評論']);let rest=findCol(headers,['餐廳_名稱','餐廳名稱','餐廳','Restaurant']);if(score>=0&&comment>=0&&rest>=0){best={a,hi,headers,score,comment,rest};break}}
  if(!best)throw new Error('找不到必要欄位：餐廳、OSAT分數、OSAT整體滿意度評論。');
  const {a,hi,headers,score,comment,rest}=best;const date=findCol(headers,['日期','填寫時間','Survey Date','Date']);const center=findCol(headers,['中心','外送中心']);const group=findCol(headers,['Group','group']);const code=findCol(headers,['餐廳代碼','餐廳編號','Restaurant Code']);let month=detectMonth(a.slice(hi+1),date);if(!month)return;
- let rows=a.slice(hi+1).filter(r=>norm(r[rest])||num(r[score])!==null).map((r,i)=>{let sc=num(r[score]);let txt=norm(r[comment]);let c=classify(txt);return applyMapping({id:i+1,restaurant:norm(r[rest]),restaurant_code:code>=0?norm(r[code]):'',center:center>=0?norm(r[center]):'',group:group>=0?norm(r[group]):'',score:sc,comment:txt,isLow:sc!==null&&sc>=1&&sc<=3,hasComment:!!txt,main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,date:date>=0?stableDate(r[date]):''})});
+ let rows=a.slice(hi+1).filter(r=>norm(r[rest])||num(r[score])!==null).map((r,i)=>{let sc=num(r[score]);let txt=norm(r[comment]);let c=classify(txt);return applyMapping({id:i+1,restaurant:norm(r[rest]),restaurant_code:code>=0?norm(r[code]):'',center:center>=0?norm(r[center]):'',group:group>=0?norm(r[group]):'',score:sc,comment:txt,isLow:sc!==null&&sc>=1&&sc<=3,hasComment:!!txt,main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,positiveOnly:!!c.positiveOnly,date:date>=0?stableDate(r[date]):''})});
  // 同月份採逐筆去重：日期＋餐廳＋評分＋評論完全相同視為同一筆。
  const saved=await saveRowsToCloud(month,file.name,rows); const added=saved.added, duplicateCount=saved.duplicateCount;
  await loadCloud(); state.month=month; refreshMonthSelect(); render();
@@ -148,7 +153,7 @@ async function importFile(file){const original=await file.arrayBuffer();const da
  showImportCheck({read:rows.length,valid,low:lowN,one:oneN,mapped,unmapped,added,duplicateCount,file:file.name});
  toast(`成功解析 ${rows.length.toLocaleString()} 筆｜新增 ${added.toLocaleString()}｜重複排除 ${duplicateCount.toLocaleString()}`)}
 function showImportCheck(x){const e=document.querySelector('#importCheck');if(!e)return;e.style.display='block';e.innerHTML=`<h3>匯入檢查｜${esc(x.file)}</h3><div class="kpi-grid">${kpi('成功解析',x.read.toLocaleString(),'Excel資料列')}${kpi('有效評分',x.valid.toLocaleString(),'應與問卷筆數一致')}${kpi('1～3分',x.low.toLocaleString(),'低分資料')}${kpi('1分',x.one.toLocaleString(),'嚴重低分')}${kpi('Mapping成功',x.mapped.toLocaleString(),`未對應 ${x.unmapped.toLocaleString()} 筆`)}${kpi('重複排除',x.duplicateCount.toLocaleString(),`新增 ${x.added.toLocaleString()} 筆`)}</div>`}
-function current(){return state.months[state.month]?.rows||[]}function low(){return current().filter(r=>r.isLow)}function comments(){return low().filter(r=>r.hasComment)}
+function current(){return state.months[state.month]?.rows||[]}function low(){return current().filter(r=>r.isLow)}function comments(){return low().filter(r=>r.hasComment&&!r.positiveOnly)}
 function centerFiltered(rows){return state.globalCenter?rows.filter(r=>(r.center||'未對應')===state.globalCenter):rows}
 function availableCenters(){return [...new Set(current().map(r=>r.center||'未對應'))].filter(Boolean).sort()}
 function syncGlobalCenterFilters(){const opts='<option value="">全市場</option>'+availableCenters().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');document.querySelectorAll('.global-center-filter').forEach(s=>{s.innerHTML=opts;s.value=state.globalCenter;s.onchange=e=>{state.globalCenter=e.target.value;render();}})}
@@ -190,7 +195,7 @@ function renderMissing(co){
 function renderComments(){let co=centerFiltered(comments()),fi=document.querySelector('#filterIssue')?.value||'',ft=(document.querySelector('#filterText')?.value||'').trim();let issues=[...new Set(co.map(r=>r.main))].sort(),sel=document.querySelector('#filterIssue'),old=sel.value;sel.innerHTML='<option value="">全部主因</option>'+issues.map(x=>`<option>${esc(x)}</option>`).join('');sel.value=old;co=co.filter(r=>(!fi||r.main===fi)&&(!ft||(r.restaurant+r.comment).includes(ft)));document.querySelector('#commentsTable').innerHTML=`<div class="card"><div class="scroll">${table(['中心','Group','餐廳','分數','主要構面','主要不滿','其他標籤','漏餐品項','顧客評論'],co.map(r=>[r.center||'未對應',r.group,r.restaurant,r.score,r.dimension||dimensionOf(r.main),r.main,r.tags.join('、'),r.items.join('、'),r.comment]))}</div></div>`}
 function renderFinding(all,co){if(!all.length){document.querySelector('#finding').innerHTML='匯入當月 GES Excel 後自動產生。';return}let dims=Object.fromEntries(DIMENSION_ORDER.map(d=>[d,co.filter(r=>(r.dimension||dimensionOf(r.main))===d).length]));let centers=centerStats(all).filter(x=>x.c!=='未對應').slice(0,2);let t=`<b>${state.month} 市場方向</b><br>1～3分共 <b>${low().length}</b> 筆，其中有文字評論 <b>${co.length}</b> 筆。<br><br>外送核心構面：<b>速度</b> ${dims['速度']}筆 (${fmtp(pct(dims['速度'],co.length))})、<b>品質</b> ${dims['品質']}筆 (${fmtp(pct(dims['品質'],co.length))})、<b>正確性</b> ${dims['正確性']}筆 (${fmtp(pct(dims['正確性'],co.length))})、<b>外送異常</b> ${dims['外送異常']}筆 (${fmtp(pct(dims['外送異常'],co.length))})。`;if(centers.length)t+=`<br><br>低分件數較集中的中心為 ${centers.map(x=>`<b>${x.c}</b> ${x.low}筆`).join('、')}。`;t+=`<br><br><span class="empty">※ 主因代表顧客文字中的主要不滿；速度、品質、正確性為外送三大核心構面；傾倒／外漏／包裝破損獨立列為外送異常，不等同 DMS 可驗證的營運根因。</span>`;document.querySelector('#finding').innerHTML=t}
 
-async function ensurePreviousMonthForTrend(){let ks=(state.availableMonths||[]).slice().sort(),idx=ks.indexOf(state.month);if(idx<=0)return;let prev=ks[idx-1];if(state.months[prev])return;try{let data=await fetchAllWhere(GES_TABLE,'id,report_month,payload',`report_month=eq.${encodeURIComponent(prev)}`),rows=[];for(const x of data||[]){if(!x.payload)continue;let r=x.payload,c=classify(r.comment);Object.assign(r,{main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,date:stableDate(r.date)});applyMapping(r);rows.push(r)}let seen=new Set();rows=rows.filter(r=>{let k=rowKey(r);if(seen.has(k))return false;seen.add(k);return r.score!==0&&r.score!==null&&r.score!==undefined});state.months[prev]={file:'Supabase',rows,version:APP_VERSION}}catch(e){console.warn('上月改善追蹤資料讀取失敗',e)}}
+async function ensurePreviousMonthForTrend(){let ks=(state.availableMonths||[]).slice().sort(),idx=ks.indexOf(state.month);if(idx<=0)return;let prev=ks[idx-1];if(state.months[prev])return;try{let data=await fetchAllWhere(GES_TABLE,'id,report_month,payload',`report_month=eq.${encodeURIComponent(prev)}`),rows=[];for(const x of data||[]){if(!x.payload)continue;let r=x.payload,c=classify(r.comment);Object.assign(r,{main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,positiveOnly:!!c.positiveOnly,date:stableDate(r.date)});applyMapping(r);rows.push(r)}let seen=new Set();rows=rows.filter(r=>{let k=rowKey(r);if(seen.has(k))return false;seen.add(k);return r.score!==0&&r.score!==null&&r.score!==undefined});state.months[prev]={file:'Supabase',rows,version:APP_VERSION}}catch(e){console.warn('上月改善追蹤資料讀取失敗',e)}}
 function renderTrend(){let ks=Object.keys(state.months).sort(),idx=ks.indexOf(state.month);if(idx<=0){document.querySelector('#trendContent').innerHTML='至少匯入兩個月份後，即可比較改善、持續異常與惡化餐廳。';return}let prev=ks[idx-1],curStats=restaurantStats(state.months[state.month].rows),preStats=restaurantStats(state.months[prev].rows),pm=Object.fromEntries(preStats.map(x=>[x.name,x]));let out=curStats.filter(x=>pm[x.name]&&(!state.globalCenter||x.center===state.globalCenter)).map(x=>{let p=pm[x.name],d=x.rate-p.rate;let st=d<=-3?'改善':d>=3?'惡化':'持續關注';return[x.center,x.name,fmtp(p.rate),fmtp(x.rate),`${d>=0?'+':''}${d.toFixed(1)} pp`,st,x.main]}).sort((a,b)=>parseFloat(b[4])-parseFloat(a[4]));document.querySelector('#trendContent').innerHTML=`<h3>${prev} → ${state.month}</h3>${table(['中心','餐廳','上月低分率','本月低分率','變化','狀態','本月主要問題'],out)}`}
 function table(headers,rows){return `<table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(r=>`<tr>${r.map((c,i)=>`<td>${esc(c)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${headers.length}" class="empty">目前沒有資料</td></tr>`}</tbody></table>`}
 function exportAnalysis(){let rs=restaurantStats(current()),co=comments();let wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rs),'餐廳分析');XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(co.map(r=>({中心:r.center,Group:r.group,餐廳:r.restaurant,分數:r.score,主要構面:r.dimension||dimensionOf(r.main),主要不滿:r.main,問題標籤:r.tags.join('、'),漏餐品項:r.items.join('、'),評論:r.comment}))),'評論明細');XLSX.writeFile(wb,`GES分析_${state.month||'未指定'}.xlsx`)}
