@@ -202,7 +202,14 @@ function complaintCenterOf(r){
  let m=RESTAURANT_MAPPING[norm(r.restaurant)];if(m?.center)return normalizeCenterName(m.center)||m.center;
  return normalizeCenterName(r.center)||normalizeCenterName(r.region)||'未對應'
 }
-function isValid080(r){if(r.source!=='080')return true;return norm(r.channel).includes('網路外送')&&norm(r.feedbackType).includes('抱怨')}
+function isValid080(r){
+ if(r.source!=='080')return true;
+ const channel=norm(r.channel),feedback=norm(r.feedbackType);
+ // v7.4 以前已存入 Supabase 的 080 payload 沒有保存通路/意見類型欄位；先相容顯示，避免舊資料整批變 0。
+ // 新匯入資料一律在匯入時嚴格限定「網路外送＋抱怨」。
+ if(!channel&&!feedback)return true;
+ return channel.includes('網路外送')&&feedback.includes('抱怨');
+}
 function complaintClass(text){let t=norm(text),c=classify(t);return c.main==='其他/無法判斷'&&hasAny(t,['遲到','晚到','太慢','延遲'])?'遲到/配送時效':c.main}
 function normalizeOrder(s){return norm(s).replace(/\s/g,'').toUpperCase()}
 function restaurantCodeOf(r){let s=normalizeOrder(r.orderNo||'');let m=s.match(/^(\d{3})-/);return m?m[1]:''}
@@ -218,7 +225,7 @@ async function saveGeneric(tableName,month,file,source,rows){
 async function importComplaint(file,source){
  let a=await readWorkbook(file);let hi=a.findIndex(r=>r.some(c=>['日期','顧客回饋內容','訂單編號'].some(k=>norm(c).includes(k))));if(hi<0)throw new Error('找不到客訴欄位');
  let h=a[hi].map(norm),date=findCol(h,['日期','進線時間','建立時間','發生時間']),comment=findCol(h,['顧客回饋內容','顧客意見','回饋內容','內容']),restaurant=findCol(h,['餐廳','餐廳名稱']),region=findCol(h,['區域']),type=findCol(h,['被抱怨型態']),order=findCol(h,['訂單編號','訂單號碼']);
- let channel=findAnyCol(h,['消費型態','訂購方式','訂購型態','通路','訂餐方式','消費方式','來源']);let feedback=findAnyCol(h,['建議種類','意見類型','案件類型','回饋類型','反映類型','類別']);
+ let channel=findAnyCol(h,['消費型態','消費方式','訂購方式','訂購型態','訂餐方式','通路','服務類型','訂單類型','來源']);let feedback=findAnyCol(h,['建議種類','意見類型','意見分類','案件類型','案件分類','回饋類型','反映類型','反應類型','類別']);
  let base=a.slice(hi+1).filter(r=>norm(r[comment])||norm(r[restaurant]));
  if(source==='080'){
    if(channel<0||feedback<0)throw new Error('080 找不到「網路外送」或「抱怨/建議/表揚」欄位，為避免誤算已停止匯入。');
