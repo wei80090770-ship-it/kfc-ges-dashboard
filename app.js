@@ -1,4 +1,4 @@
-const APP_VERSION='v8.3';
+const APP_VERSION='v8.5';
 const SUPABASE_URL='https://piccgvophhtnmggwwobn.supabase.co';
 const SUPABASE_KEY='sb_publishable_2SPa8TbrgAhbglUKdk3VGg_9DvRriFP';
 const GES_TABLE='ges_responses';
@@ -6,50 +6,67 @@ const state={months:{},month:'',chart:null,globalCenter:'',restaurantRank:'low',
 const RESTAURANT_MAPPING = window.RESTAURANT_MAPPING || {};
 const CLASSIFICATION_OVERRIDES = window.CLASSIFICATION_OVERRIDES || {};
 function applyMapping(row){const m=RESTAURANT_MAPPING[norm(row.restaurant)];if(m){row.restaurant_code=row.restaurant_code||m.code||'';row.center=m.center||row.center||'';row.group=m.group||row.group||'';}else{row.center=row.center||'未對應';}return row;}
-const DIMENSION_ORDER=['速度','品質','正確性','外送異常','其他'];
-const ISSUE_ORDER=['遲到/配送時效','餐點品質','包裝/外觀','食安/異物','漏餐/缺品','錯餐/品項錯誤','外送交付','服務態度/處理','系統/訂購/優惠','價格/份量','多重問題/主因不明','其他/無法判斷'];
+const DIMENSION_ORDER=['速度','品質','正確性','外送異常','服務/處理','系統/訂購','價格/份量','其他'];
+const ISSUE_ORDER=['遲到/配送時效','過早送達','餐點品質','包裝/外觀','食安/異物','漏餐/缺品','錯餐/品項錯誤','外送交付','服務態度/處理','系統/訂購/優惠','價格/份量','多重問題/主因不明','其他/無法判斷'];
 const ISSUE_DIMENSION={
- '遲到/配送時效':'速度',
- '餐點品質':'品質','包裝/外觀':'外送異常','食安/異物':'品質',
+ '遲到/配送時效':'速度','過早送達':'速度',
+ '餐點品質':'品質','食安/異物':'品質',
+ '包裝/外觀':'外送異常',
  '漏餐/缺品':'正確性','錯餐/品項錯誤':'正確性',
- '外送交付':'其他','服務態度/處理':'其他','系統/訂購/優惠':'其他','價格/份量':'其他','多重問題/主因不明':'其他','其他/無法判斷':'其他','無評論':'其他'
+ '外送交付':'服務/處理','服務態度/處理':'服務/處理',
+ '系統/訂購/優惠':'系統/訂購','價格/份量':'價格/份量',
+ '多重問題/主因不明':'其他','其他/無法判斷':'其他','無評論':'其他'
 };
 const rules={
- '遲到/配送時效':['遲到','延遲','超時','太慢','很慢','慢了','慢到','久等','等很久','等太久','等待太久','等了一個','等了快','等了將近','等超過','一個多小時','一個小時','1小時','半個多小時','50分鐘','40分鐘','30分鐘','送太久','送很久','時間太久','時間過長','晚到','才送到','才拿到','追餐','預計時間','超過預定','超過時間'],
- '漏餐/缺品':['少了','少一','少兩','少給','少送','漏餐','漏送','沒送','沒有送','沒有附','沒附','未附','缺少','缺了','漏掉','沒拿到','沒有拿到','沒收到','未收到','沒給','沒有給','忘了給','缺餐','送錯餐','送錯品','餐點送錯','拿錯','錯餐','給錯','品項錯','口味錯','數量錯','內容錯','做錯','不是我點','點A送B','錯誤餐點'],
- '錯餐/品項錯誤':['__不使用__'],
- '餐點品質':['沒氣','沒有氣','無氣','氣泡不足','像糖水','白開水','油耗味','冷掉','冷的','冷了','都冷','不熱','溫的','難吃','不好吃','很乾','太乾','柴','太油','油耗味','油味','不脆','軟掉','軟趴趴','濕軟','焦掉','焦黑','炸太久','炸過頭','生的','沒熟','臭','異味','不新鮮','口感','品質','味道','太鹹','太淡','太辣','變質','不好咬','硬'],
- '包裝/外觀':['包裝','灑出','灑了','打翻','倒了','倒的','流出來','外漏','漏出','破掉','破損','壓壞','擠壓','散掉','湯汁','盒子開','袋子破'],
- '食安/異物':['異物','頭髮','毛髮','蟲','蟑螂','蒼蠅','塑膠','鐵絲','發霉','酸掉'],
- '外送交付':['送錯地方','送錯地址','放錯地方','找不到地址','沒有打電話','沒打電話','未聯絡','沒聯絡','放門口','送到別人','送錯地點','外送員找不到'],
- '服務態度/處理':['態度','客服','服務','沒禮貌','不耐煩','口氣','電話沒人接','沒人接','無人接聽','不處理','沒有處理','處理方式','回覆','客訴','抱怨','通知'],
- '系統/訂購/優惠':['app','APP','系統','無法下單','不能下單','不能點','點餐','訂購','訂餐','優惠券','優惠','折扣','付款','刷卡','發票','網站','網頁','會員','點數','兌換'],
- '價格/份量':['太貴','很貴','價格','價錢','份量','太少','縮水','CP值','不划算']
+ '遲到/配送時效':['遲到','延遲','延誤','超時','太慢','很慢','慢了','慢到','久等','等很久','等太久','等待太久','等了一個','等了快','等了將近','等超過','一個多小時','一個小時','1小時','半個多小時','50分鐘','40分鐘','30分鐘','送太久','送很久','時間太久','時間過長','晚到','才送到','追餐','超過預定','超過時間','預估外送時間與實際不符','預計送達時間跟實際','未準時','沒有準時','配送速度','外送速度有待改善'],
+ '過早送達':['提早送達','提早送到','提前送達','提前送到','過早送達','過早送到','太早送到','太早送達','提早了','提前了','預定時間前'],
+ '漏餐/缺品':['餐點缺漏','缺餐','漏餐','漏送','少送','少給','少了','少一','少兩','缺少','缺了','漏掉','沒附','未附','沒有附','沒給','未給','沒有給','忘了給','沒拿到','沒有拿到','沒收到','未收到','沒提供','未提供','沒有提供','欠東西','漏放','少放','贈品沒給','餐具都沒有','一包都沒有','都沒提供'],
+ '錯餐/品項錯誤':['送錯餐','送錯單','送錯品','餐點送錯','餐點有誤','餐點錯','拿錯','錯餐','給錯','品項錯','品項有誤','口味錯','數量錯','數量不對','內容錯','做錯','不是我點','點A送B','錯誤餐點','來的是','全辣','全不辣'],
+ '餐點品質':['沒氣','沒有氣','無氣','氣泡不足','像糖水','白開水','油耗味','冷掉','冷的','冷了','都冷','不熱','溫的','難吃','不好吃','很乾','太乾','乾柴','柴','太油','油味','不脆','軟掉','軟趴趴','濕軟','焦掉','焦黑','炸太久','炸過頭','生的','沒熟','臭','異味','不新鮮','口感','品質','味道','太鹹','太淡','太辣','變質','不好咬','很硬','肉很硬','雞腥味','不入味','美味程度不足','不好吃'],
+ '包裝/外觀':['飲料封裝不當','包裝破損','包裝','灑出','灑了','撒出','撒了','打翻','倒翻','飲料倒','飲料漏','飲料破','流出來','外漏','漏出','破掉','破損','壓壞','擠壓','變形','散掉','湯汁','盒子開','袋子破','封膜裂開','浸泡','濕掉','紙袋濕'],
+ '食安/異物':['異物','頭髮','毛髮','蟲','蟑螂','蒼蠅','塑膠','鐵絲','發霉','酸掉','水瀉','食安','食品安全'],
+ '外送交付':['送錯地方','送錯地址','放錯地方','找不到地址','找不到位置','沒有打電話','沒打電話','未聯絡','沒聯絡','放門口','丟在門口','送到別人','送錯地點','外送員找不到','沒有送到具體','不看備註','地址錯','地址不完整'],
+ '服務態度/處理':['態度差','態度極差','沒禮貌','不耐煩','口氣不好','電話沒人接','無人接聽','不處理','沒有處理','沒處理','處理方式','客服沒回','客服未回','沒有回覆','沒回覆','未回覆','無法聯絡客服','客服忙線','沒通知','未通知','沒有通知','沒告知','未告知','沒有告知','客訴沒處理','服務差'],
+ '系統/訂購/優惠':['app問題','APP問題','系統問題','系統顯示','系統未更新','進度未更新','時間未更新','外送地圖','地圖','無法下單','不能下單','無法點餐','不能點餐','優惠券','優惠','折扣','付款問題','刷卡問題','發票問題','網站問題','網頁問題','會員問題','點數','兌換','訂單消失','被取消','取消訂單'],
+ '價格/份量':['太貴','很貴','價格','價錢','份量','太少','縮水','CP值','不划算','份量不足','少得離譜','變小']
 };
-const itemRules={飲料:['飲料','可樂','雪碧','紅茶','奶茶','咖啡','汽水'],蛋撻:['蛋撻','蛋塔'],薯條點心:['薯條','雞塊','點心','脆薯','薯餅','雞米花'],炸雞主餐:['炸雞','雞腿','雞翅','漢堡','堡','捲','主餐'],醬料:['醬','番茄醬','辣醬'],餐具用品:['吸管','餐具','紙巾','湯匙','叉子']};
+const itemRules={飲料:['飲料','可樂','雪碧','紅茶','奶茶','咖啡','汽水'],蛋撻:['蛋撻','蛋塔'],薯條點心:['薯條','雞塊','點心','脆薯','薯餅','雞米花'],炸雞主餐:['炸雞','雞腿','雞翅','漢堡','堡','捲','主餐'],醬料:['醬','番茄醬','辣醬','胡椒'],餐具用品:['吸管','餐具','紙巾','湯匙','叉子','手套']};
 function norm(s){return String(s??'').trim()}
 function num(v){if(v===null||v===undefined||norm(v)==='')return null;let n=Number(v);return Number.isFinite(n)?n:null}
 function hasAny(t,arr){return arr.some(k=>t.includes(k))}
 function findCol(headers,terms){const h=headers.map(x=>norm(x));for(const t of terms){let i=h.findIndex(x=>x===t);if(i>=0)return i}for(const t of terms){let i=h.findIndex(x=>x.includes(t));if(i>=0)return i}return -1}
 function dimensionOf(main){return ISSUE_DIMENSION[main]||'其他'}
-function keywordHits(text,arr){let score=0;for(const k of arr){if(text.includes(k))score+=Math.max(1,Math.min(4,k.length/2));}return score}
+function keywordHits(text,arr){let score=0;for(const k of arr){if(text.includes(k))score+=Math.max(1,Math.min(6,k.length/2));}return score}
 function classify(text){
  text=norm(text);if(!text)return {main:'無評論',dimension:'其他',tags:[],items:[],confidence:'低'};
- // 已人工檢視過的 M8 評論使用校正版，後續月份再走規則引擎。
  let override=CLASSIFICATION_OVERRIDES[text];
  let scores={},tags=[];
  for(const [k,ks] of Object.entries(rules)){let sc=keywordHits(text,ks);if(sc>0){scores[k]=sc;tags.push(k)}}
+ // 高辨識度語意：先用完整語句判斷，避免「訂購、外送、服務」等一般字眼誤判。
+ const strong=[];
+ const addStrong=(k,n=12)=>{scores[k]=(scores[k]||0)+n;if(!tags.includes(k))tags.push(k);strong.push(k)};
+ if(/(餐點缺漏|漏餐|漏送|少送|少給|缺少|缺餐|漏放|沒附|未附|沒有附|沒給|未給|沒有給|沒提供|未提供|沒有提供|欠東西)/i.test(text))addStrong('漏餐/缺品');
+ if(/(送錯餐|送錯單|餐點有誤|餐點錯|品項有誤|品項錯|口味錯|數量(錯|不對)|給錯|拿錯|送錯品|全辣|全不辣)/i.test(text))addStrong('錯餐/品項錯誤',14);
+ if(/(飲料.*(灑|撒|漏|倒|破)|封裝不當|湯汁.*(灑|漏)|包裝.*(破|損)|擠壓.*(爛|變形)|紙袋.*(濕|爛))/i.test(text))addStrong('包裝/外觀',15);
+ if(/(提早|提前|過早|太早).{0,10}(送達|送到|到了|抵達)/i.test(text)||/(預定|預約).{0,12}(結果|卻).{0,8}(提早|提前)/i.test(text))addStrong('過早送達',15);
+ if(/(遲到|延遲|延誤|超時|晚到|等很久|等太久|送太久|超過.{0,8}(預定|預計|時間)|晚.{0,6}(分鐘|小時).{0,8}(送達|送到|到))/i.test(text))addStrong('遲到/配送時效',14);
+ if(/(預估|預計|系統).{0,12}(時間|送達).{0,12}(實際|不符|差|延後|未更新)/i.test(text))addStrong('遲到/配送時效',8);
+ if(/(外送地圖|地圖.*(怪|錯|特別)|APP.*(錯|問題|無法)|系統.*(錯|問題|未更新|沒更新)|進度.*(未更新|沒更新)|訂單.*(消失|取消))/i.test(text))addStrong('系統/訂購/優惠',13);
+ if(/(外送員|客服|店員|人員).{0,16}(態度|沒禮貌|不耐煩|口氣|不處理|沒回|未回|沒通知|未通知)/i.test(text))addStrong('服務態度/處理',12);
+ if(/(找不到地址|找不到位置|送錯地址|送錯地方|放錯地方|丟在.*門口|沒打電話|沒有打電話|不看備註)/i.test(text))addStrong('外送交付',13);
+ if(/(冷掉|不熱|難吃|油耗味|沒氣|沒有氣|不脆|軟掉|乾柴|太乾|焦黑|異味|雞腥味|不入味|口感.*(差|不好)|美味程度不足)/i.test(text))addStrong('餐點品質',11);
+ if(/(份量.*(少|不足)|縮水|少得離譜|太貴|價格.*(高|貴)|變小)/i.test(text))addStrong('價格/份量',12);
  let main='其他/無法判斷',confidence='低';
  if(override){main=override;confidence='高';if(!tags.includes(main)&&rules[main])tags.unshift(main)}
  else if(tags.length){
-   // 明確因果/強調語句提高主因權重。
-   for(const k of tags){for(const w of rules[k]){if(text.includes('因為'+w)||text.includes('主要是'+w)||text.includes('最不能接受'+w)||text.startsWith(w))scores[k]+=5}}
-   // 「就算了/還/結果」後方問題通常是顧客最後強調的不滿。
-   for(const cue of ['結果','還','竟然','就算了']){let pos=text.lastIndexOf(cue);if(pos>=0){let tail=text.slice(pos);for(const k of tags)if(hasAny(tail,rules[k]))scores[k]+=3}}
-   let ranked=Object.entries(scores).sort((a,b)=>b[1]-a[1]);main=ranked[0][0];confidence=ranked.length===1||ranked[0][1]>=ranked[1][1]+2?'高':'中';
-   if(ranked.length>1&&ranked[0][1]===ranked[1][1]&&text.length<18){main='多重問題/主因不明';confidence='低'}
+   for(const k of tags){for(const w of (rules[k]||[])){if(text.includes('因為'+w)||text.includes('主要是'+w)||text.includes('最不能接受'+w)||text.startsWith(w))scores[k]=(scores[k]||0)+5}}
+   for(const cue of ['結果','竟然','就算了','重點是','最不能接受']){let pos=text.lastIndexOf(cue);if(pos>=0){let tail=text.slice(pos);for(const k of tags)if(hasAny(tail,rules[k]||[]))scores[k]=(scores[k]||0)+3}}
+   let ranked=Object.entries(scores).sort((a,b)=>b[1]-a[1]);main=ranked[0][0];confidence=strong.includes(main)||ranked.length===1||ranked[0][1]>=ranked[1][1]+4?'高':'中';
+   if(ranked.length>1&&ranked[0][1]===ranked[1][1]&&!strong.length&&text.length<18){main='多重問題/主因不明';confidence='低'}
  }
- let items=[];if(tags.includes('漏餐/缺品')||main==='漏餐/缺品')for(const [k,ks] of Object.entries(itemRules))if(hasAny(text,ks))items.push(k);if((tags.includes('漏餐/缺品')||main==='漏餐/缺品')&&!items.length)items=['未說明品項'];
+ // 正向文字本身不應成為負面主因；只有正向詞且沒有具體問題時保留無法判斷。
+ if(/(準時送達|送餐很快|外送快速|態度非常好|服務很好|很滿意)/i.test(text)&&tags.length===1&&['遲到/配送時效','服務態度/處理'].includes(main)){main='其他/無法判斷';confidence='低'}
+ let items=[];if(tags.includes('漏餐/缺品')||tags.includes('錯餐/品項錯誤')||['漏餐/缺品','錯餐/品項錯誤'].includes(main))for(const [k,ks] of Object.entries(itemRules))if(hasAny(text,ks))items.push(k);if((tags.includes('漏餐/缺品')||tags.includes('錯餐/品項錯誤')||['漏餐/缺品','錯餐/品項錯誤'].includes(main))&&!items.length)items=['未說明品項'];
  return {main,dimension:dimensionOf(main),tags,items,confidence};
 }
 function stableDate(v){if(v instanceof Date&&!isNaN(v))return v.toISOString().slice(0,19);let s=norm(v);return s.replace(/\.000Z$/,'').replace(/Z$/,'')}
@@ -242,10 +259,12 @@ function renderComplaints(){
  let month=state.month||'',raw=state.complaints.filter(x=>!month||x.report_month===month).map(x=>({...x.payload,source:x.source_type,month:x.report_month})).filter(isValid080);
  const six=['台北','新北','桃園','台中','台南','高雄'],sel=document.querySelector('#complaintCenter');if(sel){sel.innerHTML='<option value="">全市場</option>'+six.map(c=>`<option>${c}</option>`).join('');sel.value=state.complaintCenter}
  let rs=raw.filter(r=>(state.complaintSource==='all'||r.source===state.complaintSource)&&(!state.complaintCenter||complaintCenterOf(r)===state.complaintCenter));let n080=rs.filter(r=>r.source==='080').length,n4128=rs.filter(r=>r.source==='4128').length,late=rs.filter(r=>r.source==='4128'&&complaintClass(r.comment)==='遲到/配送時效'),third=late.filter(r=>isThirdPartyComplaint(r)===true),thirdEffective=rs.filter(isEffectiveThirdPartyComplaint);
- let days={};for(const r of rs){let d=dateParts(r.date).day;if(d)days[d]=(days[d]||0)+1}let issues={};for(const r of rs){let k=complaintClass(r.comment);issues[k]=(issues[k]||0)+1}
+ let days={};for(const r of rs){let d=dateParts(r.date).day;if(d)days[d]=(days[d]||0)+1}
+ let issues={},issues080={},issues4128={};for(const r of rs){let k=complaintClass(r.comment);issues[k]=(issues[k]||0)+1;if(r.source==='080')issues080[k]=(issues080[k]||0)+1;if(r.source==='4128')issues4128[k]=(issues4128[k]||0)+1}
  let stats=lateCodeStats(late),codeSel=document.querySelector('#complaintRestaurantCode');if(codeSel){let old=state.complaintRestaurantCode;codeSel.innerHTML='<option value="">全部餐廳代碼</option>'+stats.map(x=>`<option value="${esc(x.code)}">${esc(x.code)}（${x.count}筆）</option>`).join('');if(stats.some(x=>x.code===old)){codeSel.value=old}else{state.complaintRestaurantCode='';codeSel.value=''}}
  let chosen=state.complaintRestaurantCode?stats.find(x=>x.code===state.complaintRestaurantCode):null,detail='';
  if(chosen){let dd=Object.entries(groupBy(chosen.rows,r=>dateParts(r.date).day)).filter(x=>x[0]).map(([d,v])=>[d,v.length]).sort((a,b)=>a[0].localeCompare(b[0]));detail=`<div class="card" style="margin-top:16px"><h3>${esc(chosen.code)} 餐廳代碼｜遲到發生分析</h3><div class="kpi-grid">${kpi('遲到抱怨',chosen.count,'筆')}${kpi('發生天數',chosen.days,'天')}${kpi('最高日期',chosen.topDay,`${chosen.topDayN} 筆`)}${kpi('第三方遲到',chosen.third,'筆')}</div><h3>日期分布</h3>${table(['日期','遲到筆數'],dd)}</div>`}
- let e=document.querySelector('#complaintContent');if(!e)return;e.className='';e.innerHTML=`<div class="kpi-grid">${kpi('080 網路外送抱怨',n080,'僅網路外送＋抱怨')}${kpi('4128 抱怨',n4128,'全部為外送訂單')}${kpi('4128 遲到',late.length,'遲到/配送時效')}${kpi('第三方有效抱怨',thirdEffective.length,'排除：漏餐/錯餐、價格、系統問題')}${kpi('其中第三方遲到',third.length,`日期＋訂單號配對｜第三方訂單 ${state.thirdParty.length.toLocaleString()} 筆`)}</div><div class="grid2"><div class="card"><h3>問題分類</h3>${table(['問題','件數'],Object.entries(issues).sort((a,b)=>b[1]-a[1]))}</div><div class="card"><h3>抱怨日期</h3>${table(['日期','件數'],Object.entries(days).sort((a,b)=>b[1]-a[1]).slice(0,31))}</div></div><div class="card" style="margin-top:16px"><h3>4128 遲到｜餐廳代碼排名</h3>${table(['餐廳代碼','遲到筆數','發生天數','最高日期','第三方遲到'],stats.map(x=>[x.code,x.count,x.days,`${x.topDay} (${x.topDayN})`,x.third]))}</div>${detail}<div class="card" style="margin-top:16px"><h3>4128 遲到明細</h3><div class="scroll">${table(['日期','餐廳代碼','中心','餐廳/歸屬','訂單編號','第三方','內容'],late.filter(r=>!state.complaintRestaurantCode||restaurantCodeOf(r)===state.complaintRestaurantCode).map(r=>[dateParts(r.date).day,restaurantCodeOf(r),complaintCenterOf(r),r.restaurant,r.orderNo,isThirdPartyComplaint(r)?'是':'否',r.comment]))}</div></div>`
+ let issueTable=state.complaintSource==='all'?table(['問題','080','4128','合計'],Object.keys(issues).sort((a,b)=>issues[b]-issues[a]).map(k=>[k,issues080[k]||0,issues4128[k]||0,issues[k]||0])):table(['問題','件數'],Object.entries(issues).sort((a,b)=>b[1]-a[1]));
+ let e=document.querySelector('#complaintContent');if(!e)return;e.className='';e.innerHTML=`<div class="kpi-grid">${kpi('080 網路外送抱怨',n080,'僅網路外送＋抱怨')}${kpi('4128 抱怨',n4128,'全部為外送訂單')}${kpi('4128 遲到',late.length,'與問題分類中的 4128 遲到一致')}${kpi('第三方有效抱怨',thirdEffective.length,'排除：漏餐/錯餐、價格、系統問題')}${kpi('其中第三方遲到',third.length,`日期＋訂單號配對｜第三方訂單 ${state.thirdParty.length.toLocaleString()} 筆`)}</div><div class="grid2"><div class="card"><h3>問題分類${state.complaintSource==='all'?'｜來源拆分':''}</h3>${issueTable}</div><div class="card"><h3>抱怨日期</h3>${table(['日期','件數'],Object.entries(days).sort((a,b)=>b[1]-a[1]).slice(0,31))}</div></div><div class="card" style="margin-top:16px"><h3>4128 遲到｜餐廳代碼排名</h3>${table(['餐廳代碼','遲到筆數','發生天數','最高日期','第三方遲到'],stats.map(x=>[x.code,x.count,x.days,`${x.topDay} (${x.topDayN})`,x.third]))}</div>${detail}<div class="card" style="margin-top:16px"><h3>4128 遲到明細</h3><div class="scroll">${table(['日期','餐廳代碼','中心','餐廳/歸屬','訂單編號','第三方','內容'],late.filter(r=>!state.complaintRestaurantCode||restaurantCodeOf(r)===state.complaintRestaurantCode).map(r=>[dateParts(r.date).day,restaurantCodeOf(r),complaintCenterOf(r),r.restaurant,r.orderNo,isThirdPartyComplaint(r)?'是':'否',r.comment]))}</div></div>`
 }
 document.querySelector('#importBtn').onclick=()=>document.querySelector('#fileInput').click();document.querySelector('#fileInput').onchange=e=>e.target.files[0]&&importFile(e.target.files[0]).catch(err=>alert(err.message));document.querySelector('#monthSelect').onchange=e=>{loadCloud(e.target.value)};document.querySelectorAll('.tab:not(.disabled)').forEach(b=>b.onclick=async()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelector('#'+b.dataset.page).classList.add('active');if(b.dataset.page==='trend'){document.querySelector('#trendContent').innerHTML='正在讀取上月資料…';await ensurePreviousMonthForTrend();renderTrend()}});document.querySelector('#filterIssue').onchange=renderComments;document.querySelector('#restaurantRank').onchange=e=>{state.restaurantRank=e.target.value;renderRestaurants(current())};document.querySelector('#filterText').oninput=renderComments;document.querySelector('#exportBtn').onclick=exportAnalysis;document.querySelector('#import080Btn').onclick=()=>document.querySelector('#file080').click();document.querySelector('#import4128Btn').onclick=()=>document.querySelector('#file4128').click();document.querySelector('#import3rdBtn').onclick=()=>document.querySelector('#file3rd').click();document.querySelector('#file080').onchange=e=>e.target.files[0]&&importComplaint(e.target.files[0],'080').catch(x=>alert(x.message));document.querySelector('#file4128').onchange=e=>e.target.files[0]&&importComplaint(e.target.files[0],'4128').catch(x=>alert(x.message));document.querySelector('#file3rd').onchange=e=>e.target.files[0]&&importThird(e.target.files[0]).catch(x=>alert(x.message));document.querySelector('#complaintSource').onchange=e=>{state.complaintSource=e.target.value;renderComplaints()};document.querySelector('#complaintCenter').onchange=e=>{state.complaintCenter=e.target.value;renderComplaints()};document.querySelector('#complaintRestaurantCode').onchange=e=>{state.complaintRestaurantCode=e.target.value;renderComplaints()};loadCloud();
