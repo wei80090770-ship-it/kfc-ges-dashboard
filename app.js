@@ -1,8 +1,8 @@
-const APP_VERSION='v7.4';
+const APP_VERSION='v8.0';
 const SUPABASE_URL='https://piccgvophhtnmggwwobn.supabase.co';
 const SUPABASE_KEY='sb_publishable_2SPa8TbrgAhbglUKdk3VGg_9DvRriFP';
 const GES_TABLE='ges_responses';
-const state={months:{},month:'',chart:null,globalCenter:'',restaurantRank:'low',missingRank:'count',complaints:[],thirdParty:[],complaintSource:'all',complaintCenter:''};
+const state={months:{},month:'',chart:null,globalCenter:'',restaurantRank:'low',missingRank:'count',complaints:[],thirdParty:[],complaintSource:'all',complaintCenter:'',complaintRestaurantCode:''};
 const RESTAURANT_MAPPING = window.RESTAURANT_MAPPING || {};
 const CLASSIFICATION_OVERRIDES = window.CLASSIFICATION_OVERRIDES || {};
 function applyMapping(row){const m=RESTAURANT_MAPPING[norm(row.restaurant)];if(m){row.restaurant_code=row.restaurant_code||m.code||'';row.center=m.center||row.center||'';row.group=m.group||row.group||'';}else{row.center=row.center||'未對應';}return row;}
@@ -61,18 +61,25 @@ async function api(path,options={}){
  if(res.status===204)return null; const txt=await res.text(); return txt?JSON.parse(txt):null;
 }
 async function sha256(text){const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('')}
-async function loadCloud(){
+async function loadCloud(preferredMonth=''){
  try{
    document.querySelector('#dataStatus').textContent='正在讀取 Supabase…';
-   const data=await fetchAll(GES_TABLE,'id,report_month,payload');
-   state.months={};
-   for(const x of (data||[])){
-     const m=x.report_month||x.payload?.month||''; if(!m||!x.payload)continue;
-     const r=x.payload; let c=classify(r.comment);Object.assign(r,{main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,date:stableDate(r.date)});applyMapping(r);
-     (state.months[m]??={file:'Supabase',rows:[],version:APP_VERSION}).rows.push(r);
+   let month=preferredMonth||state.month;
+   if(!month){
+     try{const ms=await api('dashboard_ges_months?select=report_month,row_count&order=report_month.desc');month=ms?.[0]?.report_month||'';state.availableMonths=(ms||[]).map(x=>x.report_month)}
+     catch(_){const latest=await api(`${GES_TABLE}?select=report_month&order=report_month.desc&limit=1`);month=latest?.[0]?.report_month||'';state.availableMonths=month?[month]:[]}
    }
-   for(const m of Object.keys(state.months)){const seen=new Set();state.months[m].rows=state.months[m].rows.filter(r=>{const k=rowKey(r);if(seen.has(k))return false;seen.add(k);return r.score!==0&&r.score!==null&&r.score!==undefined})}
-   const ks=Object.keys(state.months).sort(); state.month=ks.at(-1)||''; refreshMonthSelect(); render();
+   state.months={};
+   if(month){
+     const data=await fetchAllWhere(GES_TABLE,'id,report_month,payload',`report_month=eq.${encodeURIComponent(month)}`);
+     for(const x of (data||[])){
+       const m=x.report_month||x.payload?.month||''; if(!m||!x.payload)continue;
+       const r=x.payload; let c=classify(r.comment);Object.assign(r,{main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,date:stableDate(r.date)});applyMapping(r);
+       (state.months[m]??={file:'Supabase',rows:[],version:APP_VERSION}).rows.push(r);
+     }
+     for(const m of Object.keys(state.months)){const seen=new Set();state.months[m].rows=state.months[m].rows.filter(r=>{const k=rowKey(r);if(seen.has(k))return false;seen.add(k);return r.score!==0&&r.score!==null&&r.score!==undefined})}
+   }
+   state.month=month; refreshMonthSelect(); render(); await loadAuxCloud(month);
  }catch(err){console.error(err);document.querySelector('#dataStatus').textContent='Supabase 連線失敗';alert('Supabase 讀取失敗。請先執行 ZIP 內 setup_supabase.sql。\n\n'+err.message)}
 }
 async function saveRowsToCloud(month,file,rows){
@@ -82,7 +89,7 @@ async function saveRowsToCloud(month,file,rows){
  for(let i=0;i<batch.length;i+=500){await api(GES_TABLE,{method:'POST',headers:{Prefer:'return=minimal,resolution=ignore-duplicates'},body:JSON.stringify(batch.slice(i,i+500))})}
  return {added:batch.length,duplicateCount};
 }
-function refreshMonthSelect(){const s=document.querySelector('#monthSelect');let ks=Object.keys(state.months).sort().reverse();s.innerHTML=ks.length?ks.map(m=>`<option ${m===state.month?'selected':''}>${m}</option>`).join(''):'<option value="">尚未匯入月份</option>'}
+function refreshMonthSelect(){const s=document.querySelector('#monthSelect');let ks=(state.availableMonths?.length?state.availableMonths:Object.keys(state.months)).slice().sort().reverse();if(state.month&&!ks.includes(state.month))ks.unshift(state.month);s.innerHTML=ks.length?ks.map(m=>`<option ${m===state.month?'selected':''}>${m}</option>`).join(''):'<option value="">尚未匯入月份</option>'}
 async function repairPowerBIWorkbook(arrayBuffer){
  // Power BI 有些匯出檔把 worksheet dimension 寫成 A1，SheetJS 會因此只解析第一格。
  // 必須在 XLSX.read 之前直接修正 worksheet XML，讀完後再修已經太晚。
@@ -176,35 +183,51 @@ function mealPeriod(h){if(h===null||h===undefined)return '無時間';if(h<11)ret
 function renderGesTime(){let old=document.querySelector('#gesTimeAnalysis');if(!old){old=document.createElement('div');old.id='gesTimeAnalysis';document.querySelector('#issue').appendChild(old)}let rs=centerFiltered(comments()).filter(r=>r.date);let days={};let hours={};for(const r of rs){let p=dateParts(r.date);if(p.day)days[p.day]=(days[p.day]||0)+1;if(p.hour!==null){let k=`${String(p.hour).padStart(2,'0')}:00–${String((p.hour+1)%24).padStart(2,'0')}:00`;hours[k]=(hours[k]||0)+1}}let dr=Object.entries(days).sort((a,b)=>b[1]-a[1]).slice(0,20).map((x,i)=>[i+1,x[0],x[1]]),hr=Object.entries(hours).sort((a,b)=>b[1]-a[1]).map((x,i)=>[i+1,x[0],x[1]]);old.innerHTML=`<div class="grid2" style="margin-top:16px"><div class="card"><h3>需改善日期</h3>${table(['排名','日期','低分評論'],dr)}</div><div class="card"><h3>需改善時段</h3>${hr.length?table(['排名','時段','低分評論'],hr):'<div class="empty">GES 原始日期若沒有時間，無法判斷實際時段。</div>'}</div></div>`}
 async function fetchAllWhere(table,select,filter=''){let out=[];const pageSize=1000;for(let from=0;;from+=pageSize){let qs=`${table}?select=${select}${filter?'&'+filter:''}&order=id.asc&offset=${from}&limit=${pageSize}`;let part=await api(qs)||[];out.push(...part);if(part.length<pageSize)break;}return out}
 async function fetchAll(table,select){return fetchAllWhere(table,select,'')}
-async function loadAuxCloud(){try{state.complaints=await fetchAll('complaint_records','id,report_month,source_type,payload');state.thirdParty=await fetchAll('third_party_orders','id,report_month,payload');renderComplaints()}catch(e){console.warn('客訴資料尚未建立',e)}}
-function complaintCenterOf(r){let x=norm(r.center||r.region||'');for(const c of ['台北','新北','桃園','台中','台南','高雄'])if(x.includes(c))return c;let m=RESTAURANT_MAPPING[norm(r.restaurant)];return m?.center||x||'未對應'}
+async function loadAuxCloud(month=state.month){
+ try{
+   if(!month){state.complaints=[];state.thirdParty=[];renderComplaints();return}
+   const mf=`report_month=eq.${encodeURIComponent(month)}`;
+   state.complaints=await fetchAllWhere('complaint_records','id,report_month,source_type,payload',mf);
+   state.thirdParty=await fetchAllWhere('third_party_orders','id,report_month,payload',mf);
+   buildThirdPartyIndex();renderComplaints();
+ }catch(e){console.warn('客訴資料尚未建立',e)}
+}
+function buildThirdPartyIndex(){state.thirdPartyIndex=new Set();for(const x of state.thirdParty){let p=x.payload||{},day=dateParts(p.date).day,order=canonicalOrder(p.orderNo||'');if(day&&order)state.thirdPartyIndex.add(`${x.report_month}|${day}|${order}`)}}
+function complaintCenterOf(r){let m=RESTAURANT_MAPPING[norm(r.restaurant)];if(m?.center)return m.center;for(const [name,v] of Object.entries(RESTAURANT_MAPPING)){if(v?.code&&restaurantCodeOf(r)===String(v.code))return v.center||'未對應'}return '未對應'}
 function complaintClass(text){let t=norm(text),c=classify(t);return c.main==='其他/無法判斷'&&hasAny(t,['遲到','晚到','太慢','延遲'])?'遲到/配送時效':c.main}
 function normalizeOrder(s){return norm(s).replace(/\s/g,'').toUpperCase()}
+function restaurantCodeOf(r){let s=normalizeOrder(r.orderNo||'');let m=s.match(/^(\d{3})-/);return m?m[1]:''}
 function canonicalOrder(s){s=normalizeOrder(s);if(!s)return '';let m=s.match(/^(?:[^-]+-)?(\d{3})(\d{4})$/);if(m)return `${m[1]}-${m[2]}`;m=s.match(/^(\d{3})-(\d{4})$/);if(m)return `${m[1]}-${m[2]}`;let digits=s.replace(/\D/g,'');if(digits.length>=7)return `${digits.slice(-7,-4)}-${digits.slice(-4)}`;return s}
-function isThirdPartyComplaint(r){if(r.source!=='4128'||complaintClass(r.comment)!=='遲到/配送時效')return null;let order=canonicalOrder(r.orderNo),day=dateParts(r.date).day;if(!order||!day)return false;return state.thirdParty.some(x=>{let p=x.payload||{};if(x.report_month!==r.month)return false;return dateParts(p.date).day===day&&canonicalOrder(p.orderNo||'')===order})}
+function isThirdPartyComplaint(r){if(r.source!=='4128'||complaintClass(r.comment)!=='遲到/配送時效')return null;let order=canonicalOrder(r.orderNo),day=dateParts(r.date).day;if(!order||!day)return false;return state.thirdPartyIndex?.has(`${r.month}|${day}|${order}`)||false}
+function findAnyCol(h,terms){return findCol(h,terms)}
 async function saveGeneric(tableName,month,file,source,rows){
- // 先讀取 Supabase 已存在的 hash，再排除「資料庫既有」與「本次檔案內重複」；避免 unique constraint 409。
- const filter=tableName==='complaint_records'
-   ? `report_month=eq.${encodeURIComponent(month)}&source_type=eq.${encodeURIComponent(source)}`
-   : `report_month=eq.${encodeURIComponent(month)}`;
- const existing=await api(`${tableName}?select=row_hash&${filter}&limit=50000`);
- const seen=new Set((existing||[]).map(x=>x.row_hash));
- const batch=[];let duplicateCount=0;
- for(const r of rows){
-   const h=await sha256(JSON.stringify(r));
-   if(seen.has(h)){duplicateCount++;continue;}
-   seen.add(h);
-   batch.push(tableName==='complaint_records'
-     ? {report_month:month,source_type:source,row_hash:h,source_file:file,payload:r}
-     : {report_month:month,row_hash:h,source_file:file,payload:r});
- }
- for(let i=0;i<batch.length;i+=400){
-   await api(tableName,{method:'POST',headers:{Prefer:'return=minimal'},body:JSON.stringify(batch.slice(i,i+400))});
- }
- return {read:rows.length,added:batch.length,duplicateCount};
+ const filter=tableName==='complaint_records'?`report_month=eq.${encodeURIComponent(month)}&source_type=eq.${encodeURIComponent(source)}`:`report_month=eq.${encodeURIComponent(month)}`;
+ const existing=await fetchAllWhere(tableName,'row_hash',filter);const seen=new Set((existing||[]).map(x=>x.row_hash));const batch=[];let duplicateCount=0;
+ for(const r of rows){const h=await sha256(JSON.stringify(r));if(seen.has(h)){duplicateCount++;continue}seen.add(h);batch.push(tableName==='complaint_records'?{report_month:month,source_type:source,row_hash:h,source_file:file,payload:r}:{report_month:month,row_hash:h,source_file:file,payload:r})}
+ for(let i=0;i<batch.length;i+=500)await api(tableName,{method:'POST',headers:{Prefer:'return=minimal,resolution=ignore-duplicates'},body:JSON.stringify(batch.slice(i,i+500))});return{read:rows.length,added:batch.length,duplicateCount}
 }
-async function readWorkbook(file){let buf=await file.arrayBuffer(),fixed=await repairPowerBIWorkbook(buf),wb=XLSX.read(fixed,{type:'array',cellDates:true});let best=[];for(const sn of wb.SheetNames){let a=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:'',raw:true});if(a.length>best.length)best=a}return best}
-async function importComplaint(file,source){let a=await readWorkbook(file);let hi=a.findIndex(r=>r.some(c=>['日期','顧客回饋內容','訂單編號'].some(k=>norm(c).includes(k))));if(hi<0)throw new Error('找不到客訴欄位');let h=a[hi].map(norm),date=findCol(h,['日期']),comment=findCol(h,['顧客回饋內容','顧客意見','回饋內容','內容']),restaurant=findCol(h,['餐廳','餐廳名稱']),region=findCol(h,['區域']),type=findCol(h,['被抱怨型態']),order=findCol(h,['訂單編號','訂單號碼']);let rows=a.slice(hi+1).filter(r=>norm(r[comment])||norm(r[restaurant])).map(r=>{let p=dateParts(r[date]);return{month:p.month,date:p.date,restaurant:restaurant>=0?norm(r[restaurant]):'',region:region>=0?norm(r[region]):'',center:'',complaintType:type>=0?norm(r[type]):'',orderNo:order>=0?norm(r[order]):'',comment:comment>=0?norm(r[comment]):''}});let month=rows.find(r=>r.month)?.month||prompt('請輸入月份，例如 2026-08','2026-08');rows.forEach(r=>r.month=month);let result=await saveGeneric('complaint_records',month,file.name,source,rows);await loadAuxCloud();toast(`${source}：讀取 ${result.read} 筆｜新增 ${result.added} 筆｜重複排除 ${result.duplicateCount} 筆`)}
-async function importThird(file){let a=await readWorkbook(file);let hi=a.findIndex(r=>r.some(c=>['訂購號碼','third_party','餐廳(ID)'].some(k=>norm(c).includes(k))));if(hi<0)throw new Error('找不到第三方訂單欄位');let h=a[hi].map(norm),date=findCol(h,['落單時間','日期','訂單時間']),order=findCol(h,['訂購號碼','訂單編號']),party=findCol(h,['third_party','第三方']),restaurant=findCol(h,['餐廳(ID)','餐廳']);let rows=a.slice(hi+1).filter(r=>norm(r[order])).map(r=>{let p=dateParts(r[date]);return{month:p.month,date:p.date,orderNo:norm(r[order]),thirdParty:party>=0?norm(r[party]):'第三方',restaurant:restaurant>=0?norm(r[restaurant]):''}});let month=rows.find(r=>r.month)?.month||prompt('請輸入月份，例如 2026-08','2026-08');rows.forEach(r=>r.month=month);let result=await saveGeneric('third_party_orders',month,file.name,'',rows);await loadAuxCloud();toast(`第三方訂單：讀取 ${result.read} 筆｜新增 ${result.added} 筆｜重複排除 ${result.duplicateCount} 筆`)}
-function renderComplaints(){let month=state.month||'',raw=state.complaints.filter(x=>!month||x.report_month===month).map(x=>({...x.payload,source:x.source_type,month:x.report_month}));let centers=[...new Set(raw.map(complaintCenterOf))].filter(Boolean).sort(),sel=document.querySelector('#complaintCenter');if(sel){sel.innerHTML='<option value="">全市場</option>'+centers.map(c=>`<option>${esc(c)}</option>`).join('');sel.value=state.complaintCenter}let rs=raw.filter(r=>(state.complaintSource==='all'||r.source===state.complaintSource)&&(!state.complaintCenter||complaintCenterOf(r)===state.complaintCenter));let n080=rs.filter(r=>r.source==='080').length,n4128=rs.filter(r=>r.source==='4128').length,late=rs.filter(r=>r.source==='4128'&&complaintClass(r.comment)==='遲到/配送時效'),third=late.filter(r=>isThirdPartyComplaint(r)===true);let days={};for(const r of rs){let d=dateParts(r.date).day;if(d)days[d]=(days[d]||0)+1}let issues={};for(const r of rs){let k=complaintClass(r.comment);issues[k]=(issues[k]||0)+1}let e=document.querySelector('#complaintContent');if(!e)return;e.className='';e.innerHTML=`<div class="kpi-grid">${kpi('080 抱怨',n080,'件數')}${kpi('4128 抱怨',n4128,'全部為外送訂單')}${kpi('4128 遲到',late.length,'遲到/配送時效')}${kpi('其中第三方遲到',third.length,`日期＋訂單號配對｜第三方訂單 ${state.thirdParty.filter(x=>x.report_month===month).length.toLocaleString()} 筆`)}</div><div class="grid2"><div class="card"><h3>問題分類</h3>${table(['問題','件數'],Object.entries(issues).sort((a,b)=>b[1]-a[1]))}</div><div class="card"><h3>抱怨日期</h3>${table(['日期','件數'],Object.entries(days).sort((a,b)=>b[1]-a[1]).slice(0,31))}</div></div><div class="card" style="margin-top:16px"><h3>4128 遲到明細</h3>${table(['日期','中心/區域','餐廳/歸屬','訂單編號','第三方','內容'],late.map(r=>[dateParts(r.date).day,complaintCenterOf(r),r.restaurant,r.orderNo,isThirdPartyComplaint(r)?'是':'否',r.comment]))}</div>`}
-document.querySelector('#importBtn').onclick=()=>document.querySelector('#fileInput').click();document.querySelector('#fileInput').onchange=e=>e.target.files[0]&&importFile(e.target.files[0]).catch(err=>alert(err.message));document.querySelector('#monthSelect').onchange=e=>{state.month=e.target.value;render()};document.querySelectorAll('.tab:not(.disabled)').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelector('#'+b.dataset.page).classList.add('active')});document.querySelector('#filterIssue').onchange=renderComments;document.querySelector('#restaurantRank').onchange=e=>{state.restaurantRank=e.target.value;renderRestaurants(current())};document.querySelector('#filterText').oninput=renderComments;document.querySelector('#exportBtn').onclick=exportAnalysis;document.querySelector('#import080Btn').onclick=()=>document.querySelector('#file080').click();document.querySelector('#import4128Btn').onclick=()=>document.querySelector('#file4128').click();document.querySelector('#import3rdBtn').onclick=()=>document.querySelector('#file3rd').click();document.querySelector('#file080').onchange=e=>e.target.files[0]&&importComplaint(e.target.files[0],'080').catch(x=>alert(x.message));document.querySelector('#file4128').onchange=e=>e.target.files[0]&&importComplaint(e.target.files[0],'4128').catch(x=>alert(x.message));document.querySelector('#file3rd').onchange=e=>e.target.files[0]&&importThird(e.target.files[0]).catch(x=>alert(x.message));document.querySelector('#complaintSource').onchange=e=>{state.complaintSource=e.target.value;renderComplaints()};document.querySelector('#complaintCenter').onchange=e=>{state.complaintCenter=e.target.value;renderComplaints()};loadCloud().then(loadAuxCloud);
+async function importComplaint(file,source){
+ let a=await readWorkbook(file);let hi=a.findIndex(r=>r.some(c=>['日期','顧客回饋內容','訂單編號'].some(k=>norm(c).includes(k))));if(hi<0)throw new Error('找不到客訴欄位');
+ let h=a[hi].map(norm),date=findCol(h,['日期','進線時間','建立時間','發生時間']),comment=findCol(h,['顧客回饋內容','顧客意見','回饋內容','內容']),restaurant=findCol(h,['餐廳','餐廳名稱']),region=findCol(h,['區域']),type=findCol(h,['被抱怨型態']),order=findCol(h,['訂單編號','訂單號碼']);
+ let channel=findAnyCol(h,['消費型態','訂購方式','訂購型態','通路','訂餐方式','消費方式','來源']);let feedback=findAnyCol(h,['建議種類','意見類型','案件類型','回饋類型','反映類型','類別']);
+ let base=a.slice(hi+1).filter(r=>norm(r[comment])||norm(r[restaurant]));
+ if(source==='080'){
+   if(channel<0||feedback<0)throw new Error('080 找不到「網路外送」或「抱怨/建議/表揚」欄位，為避免誤算已停止匯入。');
+   base=base.filter(r=>norm(r[channel]).includes('網路外送')&&norm(r[feedback]).includes('抱怨'));
+ }
+ let rows=base.map(r=>{let p=dateParts(r[date]);return{month:p.month,date:p.date,restaurant:restaurant>=0?norm(r[restaurant]):'',region:region>=0?norm(r[region]):'',center:'',complaintType:type>=0?norm(r[type]):'',orderNo:order>=0?norm(r[order]):'',restaurantCode:order>=0?(normalizeOrder(r[order]).match(/^(\d{3})-/)?.[1]||''):'',comment:comment>=0?norm(r[comment]):'',channel:channel>=0?norm(r[channel]):'',feedbackType:feedback>=0?norm(r[feedback]):''}});
+ let month=rows.find(r=>r.month)?.month||prompt('請輸入月份，例如 2026-08','2026-08');if(!month)return;rows.forEach(r=>r.month=month);let result=await saveGeneric('complaint_records',month,file.name,source,rows);await loadAuxCloud(month);toast(`${source}：有效讀取 ${result.read} 筆｜新增 ${result.added} 筆｜重複排除 ${result.duplicateCount} 筆`)
+}
+async function importThird(file){let a=await readWorkbook(file);let hi=a.findIndex(r=>r.some(c=>['訂購號碼','third_party','餐廳(ID)'].some(k=>norm(c).includes(k))));if(hi<0)throw new Error('找不到第三方訂單欄位');let h=a[hi].map(norm),date=findCol(h,['落單時間','日期','訂單時間']),order=findCol(h,['訂購號碼','訂單編號']),party=findCol(h,['third_party','第三方']),restaurant=findCol(h,['餐廳(ID)','餐廳']);let rows=a.slice(hi+1).filter(r=>norm(r[order])).map(r=>{let p=dateParts(r[date]);return{month:p.month,date:p.date,orderNo:norm(r[order]),thirdParty:party>=0?norm(r[party]):'第三方',restaurant:restaurant>=0?norm(r[restaurant]):''}});let month=rows.find(r=>r.month)?.month||prompt('請輸入月份，例如 2026-08','2026-08');if(!month)return;rows.forEach(r=>r.month=month);let result=await saveGeneric('third_party_orders',month,file.name,'',rows);await loadAuxCloud(month);toast(`第三方訂單：讀取 ${result.read} 筆｜新增 ${result.added} 筆｜重複排除 ${result.duplicateCount} 筆`)}
+function lateCodeStats(late){let g=groupBy(late,r=>restaurantCodeOf(r)||'無代碼');return Object.entries(g).map(([code,rs])=>{let days=groupBy(rs,r=>dateParts(r.date).day),hours=groupBy(rs,r=>{let h=dateParts(r.date).hour;return h===null?'無時間':`${String(h).padStart(2,'0')}:00–${String((h+1)%24).padStart(2,'0')}:00`});let topDay=Object.entries(days).sort((a,b)=>b[1].length-a[1].length)[0],topHour=Object.entries(hours).filter(x=>x[0]!=='無時間').sort((a,b)=>b[1].length-a[1].length)[0];return{code,count:rs.length,days:Object.keys(days).filter(Boolean).length,topDay:topDay?.[0]||'-',topDayN:topDay?.[1].length||0,topHour:topHour?.[0]||'無時間',topHourN:topHour?.[1].length||0,third:rs.filter(r=>isThirdPartyComplaint(r)===true).length,rows:rs}}).sort((a,b)=>b.count-a.count)}
+function renderComplaints(){
+ let month=state.month||'',raw=state.complaints.filter(x=>!month||x.report_month===month).map(x=>({...x.payload,source:x.source_type,month:x.report_month}));
+ const six=['台北','新北','桃園','台中','台南','高雄'],sel=document.querySelector('#complaintCenter');if(sel){sel.innerHTML='<option value="">全市場</option>'+six.map(c=>`<option>${c}</option>`).join('');sel.value=state.complaintCenter}
+ let rs=raw.filter(r=>(state.complaintSource==='all'||r.source===state.complaintSource)&&(!state.complaintCenter||complaintCenterOf(r)===state.complaintCenter));let n080=rs.filter(r=>r.source==='080').length,n4128=rs.filter(r=>r.source==='4128').length,late=rs.filter(r=>r.source==='4128'&&complaintClass(r.comment)==='遲到/配送時效'),third=late.filter(r=>isThirdPartyComplaint(r)===true);
+ let days={};for(const r of rs){let d=dateParts(r.date).day;if(d)days[d]=(days[d]||0)+1}let issues={};for(const r of rs){let k=complaintClass(r.comment);issues[k]=(issues[k]||0)+1}
+ let stats=lateCodeStats(late),codeSel=document.querySelector('#complaintRestaurantCode');if(codeSel){let old=state.complaintRestaurantCode;codeSel.innerHTML='<option value="">全部餐廳代碼</option>'+stats.map(x=>`<option value="${esc(x.code)}">${esc(x.code)}（${x.count}筆）</option>`).join('');if(stats.some(x=>x.code===old)){codeSel.value=old}else{state.complaintRestaurantCode='';codeSel.value=''}}
+ let chosen=state.complaintRestaurantCode?stats.find(x=>x.code===state.complaintRestaurantCode):null,detail='';
+ if(chosen){let dd=Object.entries(groupBy(chosen.rows,r=>dateParts(r.date).day)).filter(x=>x[0]).map(([d,v])=>[d,v.length]).sort((a,b)=>b[1]-a[1]);let hh=Object.entries(groupBy(chosen.rows,r=>{let h=dateParts(r.date).hour;return h===null?'無時間':`${String(h).padStart(2,'0')}:00–${String((h+1)%24).padStart(2,'0')}:00`})).map(([h,v])=>[h,v.length]).sort((a,b)=>b[1]-a[1]);detail=`<div class="card" style="margin-top:16px"><h3>${esc(chosen.code)} 餐廳代碼｜遲到發生分析</h3><div class="kpi-grid">${kpi('遲到抱怨',chosen.count,'筆')}${kpi('發生天數',chosen.days,'天')}${kpi('最高日期',chosen.topDay,`${chosen.topDayN} 筆`)}${kpi('最高時段',chosen.topHour,chosen.topHourN?`${chosen.topHourN} 筆`:'原始資料無時間')}${kpi('第三方遲到',chosen.third,'筆')}</div><div class="grid2"><div><h3>日期分布</h3>${table(['日期','遲到筆數'],dd)}</div><div><h3>時間分布</h3>${table(['時段','遲到筆數'],hh)}</div></div></div>`}
+ let e=document.querySelector('#complaintContent');if(!e)return;e.className='';e.innerHTML=`<div class="kpi-grid">${kpi('080 網路外送抱怨',n080,'僅網路外送＋抱怨')}${kpi('4128 抱怨',n4128,'全部為外送訂單')}${kpi('4128 遲到',late.length,'遲到/配送時效')}${kpi('其中第三方遲到',third.length,`日期＋訂單號配對｜第三方訂單 ${state.thirdParty.length.toLocaleString()} 筆`)}</div><div class="grid2"><div class="card"><h3>問題分類</h3>${table(['問題','件數'],Object.entries(issues).sort((a,b)=>b[1]-a[1]))}</div><div class="card"><h3>抱怨日期</h3>${table(['日期','件數'],Object.entries(days).sort((a,b)=>b[1]-a[1]).slice(0,31))}</div></div><div class="card" style="margin-top:16px"><h3>4128 遲到｜餐廳代碼排名</h3>${table(['餐廳代碼','遲到筆數','發生天數','最高日期','最高時段','第三方遲到'],stats.map(x=>[x.code,x.count,x.days,`${x.topDay} (${x.topDayN})`,`${x.topHour}${x.topHourN?` (${x.topHourN})`:''}`,x.third]))}</div>${detail}<div class="card" style="margin-top:16px"><h3>4128 遲到明細</h3><div class="scroll">${table(['日期時間','餐廳代碼','中心','餐廳/歸屬','訂單編號','第三方','內容'],late.filter(r=>!state.complaintRestaurantCode||restaurantCodeOf(r)===state.complaintRestaurantCode).map(r=>[dateParts(r.date).date,restaurantCodeOf(r),complaintCenterOf(r),r.restaurant,r.orderNo,isThirdPartyComplaint(r)?'是':'否',r.comment]))}</div></div>`
+}
+document.querySelector('#importBtn').onclick=()=>document.querySelector('#fileInput').click();document.querySelector('#fileInput').onchange=e=>e.target.files[0]&&importFile(e.target.files[0]).catch(err=>alert(err.message));document.querySelector('#monthSelect').onchange=e=>{loadCloud(e.target.value)};document.querySelectorAll('.tab:not(.disabled)').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelector('#'+b.dataset.page).classList.add('active')});document.querySelector('#filterIssue').onchange=renderComments;document.querySelector('#restaurantRank').onchange=e=>{state.restaurantRank=e.target.value;renderRestaurants(current())};document.querySelector('#filterText').oninput=renderComments;document.querySelector('#exportBtn').onclick=exportAnalysis;document.querySelector('#import080Btn').onclick=()=>document.querySelector('#file080').click();document.querySelector('#import4128Btn').onclick=()=>document.querySelector('#file4128').click();document.querySelector('#import3rdBtn').onclick=()=>document.querySelector('#file3rd').click();document.querySelector('#file080').onchange=e=>e.target.files[0]&&importComplaint(e.target.files[0],'080').catch(x=>alert(x.message));document.querySelector('#file4128').onchange=e=>e.target.files[0]&&importComplaint(e.target.files[0],'4128').catch(x=>alert(x.message));document.querySelector('#file3rd').onchange=e=>e.target.files[0]&&importThird(e.target.files[0]).catch(x=>alert(x.message));document.querySelector('#complaintSource').onchange=e=>{state.complaintSource=e.target.value;renderComplaints()};document.querySelector('#complaintCenter').onchange=e=>{state.complaintCenter=e.target.value;renderComplaints()};document.querySelector('#complaintRestaurantCode').onchange=e=>{state.complaintRestaurantCode=e.target.value;renderComplaints()};loadCloud();
