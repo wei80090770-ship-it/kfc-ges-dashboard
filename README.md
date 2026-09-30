@@ -1,5 +1,3 @@
-v8.7: GES classification engine refined; positive-only low-score comments excluded from issue analysis; old classification overrides no longer control historical months; cache-busting added.
-
 ## v8.6 修正
 - 080+4128 合併檢視時，問題分類拆分為 080 / 4128 / 合計，避免合計遲到與「4128 遲到」KPI 被誤認為同一數字。
 - 4128 遲到 KPI 與問題分類的 4128 欄位使用完全相同的分類與中心篩選。

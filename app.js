@@ -1,4 +1,4 @@
-const APP_VERSION='v8.7';
+const APP_VERSION='v8.6';
 const SUPABASE_URL='https://piccgvophhtnmggwwobn.supabase.co';
 const SUPABASE_KEY='sb_publishable_2SPa8TbrgAhbglUKdk3VGg_9DvRriFP';
 const GES_TABLE='ges_responses';
@@ -40,8 +40,8 @@ function keywordHits(text,arr){let score=0;for(const k of arr){if(text.includes(
 function classify(text){
  text=norm(text);if(!text)return {main:'無評論',dimension:'其他',tags:[],items:[],confidence:'低',positiveOnly:false};
  // 先辨識「純正向」評論。低分問卷仍保留在問卷母數，但不列入問題分析。
- const positiveRe=/(很滿意|非常滿意|滿意|很好|很棒|很讚|很親切|很有禮貌|態度佳|態度很好|服務很好|服務很棒|效率很棒|送餐很快|外送快速|準時送達|準時到達|準時抵達|提早且準時|餐點好吃|很好吃|美味|優質|nice|great|good service|still hot|送餐效率很棒|送餐效率很好|外送很親切|服務優質|餐點美味|好吃美味|很客氣|^好$|^很好$)/i;
- const negativeRe=/(不滿|失望|不好|很差|太差|爛|遲到|延遲|延誤|超時|晚到|太慢|很慢|等很久|等太久|冷掉|不熱|難吃|油耗|沒氣|乾柴|很乾|太乾|不脆|軟掉|漏餐|漏送|少送|少給|缺少|缺餐|沒附|未附|沒有附|沒給|未給|送錯|品項錯|口味錯|數量錯|灑|撒|漏出|外漏|打翻|破損|壓壞|擠壓|態度差|不耐煩|沒通知|未通知|沒告知|未告知|找不到|送錯地址|系統問題|無法下單|優惠.*問題|太貴|份量.*少|縮水|變小|很小|異物|毛髮|沒熟|水瀉|凹陷|凹掉|盒子凹|餐點不見|找不到餐點|送過頭|提早送|提前送|送太早)/i;
+ const positiveRe=/(很滿意|非常滿意|滿意|很好|很棒|很讚|很親切|很有禮貌|態度佳|態度很好|服務很好|服務很棒|效率很棒|送餐很快|外送快速|準時送達|準時到達|準時抵達|提早且準時|餐點好吃|很好吃|美味|優質|nice|great|good service|still hot)/i;
+ const negativeRe=/(不滿|失望|不好|很差|太差|爛|遲到|延遲|延誤|超時|晚到|太慢|很慢|等很久|等太久|冷掉|不熱|難吃|油耗|沒氣|乾柴|很乾|太乾|不脆|軟掉|漏餐|漏送|少送|少給|缺少|缺餐|沒附|未附|沒有附|沒給|未給|送錯|品項錯|口味錯|數量錯|灑|撒|漏出|外漏|打翻|破損|壓壞|擠壓|態度差|不耐煩|沒通知|未通知|沒告知|未告知|找不到|送錯地址|系統問題|無法下單|優惠.*問題|太貴|份量.*少|縮水|變小|很小|異物|毛髮|沒熟|水瀉)/i;
  const positiveOnly=positiveRe.test(text)&&!negativeRe.test(text);
  if(positiveOnly)return {main:'正向意見',dimension:'正向意見',tags:[],items:[],confidence:'高',positiveOnly:true};
  let override=CLASSIFICATION_OVERRIDES[text];
@@ -51,16 +51,16 @@ function classify(text){
  const strong=[];
  const addStrong=(k,n=12)=>{scores[k]=(scores[k]||0)+n;if(!tags.includes(k))tags.push(k);strong.push(k)};
  if(/(餐點缺漏|漏餐|漏送|少送|少給|缺少|缺餐|漏放|沒附|未附|沒有附|沒給|未給|沒有給|沒提供|未提供|沒有提供|欠東西)/i.test(text))addStrong('漏餐/缺品');
- if(/(送錯餐|送錯單|餐點有誤|餐點錯|品項有誤|品項錯|口味錯|數量(錯|不對)|給錯|拿錯|送錯品|全辣|全不辣|不是.{0,8}(而是|卻是)|點的是.{0,8}(來的是|收到的是)|應該是.{0,8}(卻|結果))/i.test(text))addStrong('錯餐/品項錯誤',14);
- if(/(飲料.*(灑|撒|漏|倒|破)|封裝不當|湯汁.*(灑|漏)|包裝.*(破|損)|擠壓.*(爛|變形)|紙袋.*(濕|爛)|盒子.*(凹|壓)|餐盒.*(凹|壓)|凹陷|凹掉|飲料.*只剩.{0,6}(杯|[0-9]\/[0-9]))/i.test(text))addStrong('包裝/外觀',15);
+ if(/(送錯餐|送錯單|餐點有誤|餐點錯|品項有誤|品項錯|口味錯|數量(錯|不對)|給錯|拿錯|送錯品|全辣|全不辣)/i.test(text))addStrong('錯餐/品項錯誤',14);
+ if(/(飲料.*(灑|撒|漏|倒|破)|封裝不當|湯汁.*(灑|漏)|包裝.*(破|損)|擠壓.*(爛|變形)|紙袋.*(濕|爛))/i.test(text))addStrong('包裝/外觀',15);
  if(/(提早|提前|過早|太早).{0,10}(送達|送到|到了|抵達)/i.test(text)||/(預定|預約).{0,12}(結果|卻).{0,8}(提早|提前)/i.test(text))addStrong('過早送達',15);
  if(/(遲到|延遲|延誤|超時|晚到|等很久|等太久|送太久|超過.{0,8}(預定|預計|時間)|晚.{0,6}(分鐘|小時).{0,8}(送達|送到|到))/i.test(text))addStrong('遲到/配送時效',14);
  if(/(預估|預計|系統).{0,12}(時間|送達).{0,12}(實際|不符|差|延後|未更新)/i.test(text))addStrong('遲到/配送時效',8);
  if(/(外送地圖|地圖.*(怪|錯|特別)|APP.*(錯|問題|無法)|系統.*(錯|問題|未更新|沒更新)|進度.*(未更新|沒更新)|訂單.*(消失|取消))/i.test(text))addStrong('系統/訂購/優惠',13);
  if(/(外送員|客服|店員|人員).{0,16}(態度|沒禮貌|不耐煩|口氣|不處理|沒回|未回|沒通知|未通知)/i.test(text))addStrong('服務態度/處理',12);
- if(/(找不到地址|找不到位置|送錯地址|送錯地方|放錯地方|丟在.*門口|沒打電話|沒有打電話|不看備註|餐點不見|找不到餐點|已送達.{0,12}(沒看到|沒收到)|放了.{0,8}(卻沒通知|沒通知))/i.test(text))addStrong('外送交付',13);
+ if(/(找不到地址|找不到位置|送錯地址|送錯地方|放錯地方|丟在.*門口|沒打電話|沒有打電話|不看備註)/i.test(text))addStrong('外送交付',13);
  if(/(冷掉|不熱|難吃|油耗味|沒氣|沒有氣|不脆|軟掉|乾柴|太乾|焦黑|異味|雞腥味|不入味|口感.*(差|不好)|美味程度不足)/i.test(text))addStrong('餐點品質',11);
- if(/(份量.*(少|不足)|縮水|少得離譜|太貴|價格.*(高|貴)|變小|雞塊.{0,4}(很小|太小)|餐點.{0,4}(很小|太小)|雞腿.{0,4}(很小|太小)|炸雞.{0,4}(很小|太小)|漢堡.{0,4}(很小|太小))/i.test(text))addStrong('價格/份量',12);
+ if(/(份量.*(少|不足)|縮水|少得離譜|太貴|價格.*(高|貴)|變小|雞塊.{0,4}(很小|太小)|餐點.{0,4}(很小|太小))/i.test(text))addStrong('價格/份量',12);
  let main='其他/無法判斷',confidence='低';
  // v8.6 以新版語意規則優先；舊 override 只在新版完全沒有辨識結果時補位，避免舊分類鎖死錯誤。
  if(tags.length){
@@ -68,11 +68,9 @@ function classify(text){
    for(const cue of ['結果','竟然','就算了','重點是','最不能接受']){let pos=text.lastIndexOf(cue);if(pos>=0){let tail=text.slice(pos);for(const k of tags)if(hasAny(tail,rules[k]||[]))scores[k]=(scores[k]||0)+3}}
    let ranked=Object.entries(scores).sort((a,b)=>b[1]-a[1]);main=ranked[0][0];confidence=strong.includes(main)||ranked.length===1||ranked[0][1]>=ranked[1][1]+4?'高':'中';
    if(ranked.length>1&&ranked[0][1]===ranked[1][1]&&!strong.length&&text.length<18){main='多重問題/主因不明';confidence='低'}
- } // v8.7 不再以舊 override 決定主因；歷史資料一律依目前評論文字重新分類
+ } else if(override && override!=='其他/無法判斷'){main=override;confidence='中';if(rules[main])tags.push(main)}
  // 正向文字本身不應成為負面主因；只有正向詞且沒有具體問題時保留無法判斷。
  if(/(準時送達|送餐很快|外送快速|態度非常好|服務很好|很滿意)/i.test(text)&&tags.length===1&&['遲到/配送時效','服務態度/處理'].includes(main)){main='其他/無法判斷';confidence='低'}
- // 明確正向且新版規則沒有抓到任何負向問題時，從問題分析排除。
- if(positiveRe.test(text)&&!negativeRe.test(text)&&tags.length===0)return {main:'正向意見',dimension:'正向意見',tags:[],items:[],confidence:'高',positiveOnly:true};
  let items=[];if(tags.includes('漏餐/缺品')||tags.includes('錯餐/品項錯誤')||['漏餐/缺品','錯餐/品項錯誤'].includes(main))for(const [k,ks] of Object.entries(itemRules))if(hasAny(text,ks))items.push(k);if((tags.includes('漏餐/缺品')||tags.includes('錯餐/品項錯誤')||['漏餐/缺品','錯餐/品項錯誤'].includes(main))&&!items.length)items=['未說明品項'];
  return {main,dimension:dimensionOf(main),tags,items,confidence,positiveOnly:false};
 }
