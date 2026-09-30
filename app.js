@@ -1,4 +1,4 @@
-const APP_VERSION='v8.9';
+const APP_VERSION='v8.10';
 const SUPABASE_URL='https://piccgvophhtnmggwwobn.supabase.co';
 const SUPABASE_KEY='sb_publishable_2SPa8TbrgAhbglUKdk3VGg_9DvRriFP';
 const GES_TABLE='ges_responses';
@@ -68,6 +68,15 @@ function classify(text){
  if(/(偏乾|偏軟|不酥|不酥脆|酸腐味|腥味|很腥|皮.{0,4}(軟|不脆)|餐點.{0,6}不夠熱|炸雞.{0,6}(軟|乾))/i.test(text))addStrong('餐點品質',13);
  if(/(盒子.{0,6}(凹|壓|變形)|蛋塔.{0,8}(壓|擠)|雞汁.{0,6}(漏|流)|湯汁?.{0,6}(漏|流)|醬汁.{0,6}(漏|流))/i.test(text))addStrong('包裝/外觀',15);
  if(/((第三方|外送員).{0,18}(不知道送到哪|沒送到|未送到)|顯示.{0,8}送達.{0,12}(沒收到|未收到)|餐點.{0,8}(不見|消失))/i.test(text))addStrong('外送交付',15);
+ // v8.10：依 2026-09 實際「其他/無法判斷」案例校準，僅補高明確度事件，不用廣泛單字硬猜。
+ if(/(預定|預約|指定).{0,12}(六點半|[0-2]?\d[:：][0-5]\d).{0,14}(六點就到|提早|提前|早到)|預定六點半.{0,8}六點就到/i.test(text))addStrong('過早送達',18);
+ if(/(外送逾時|外送超級慢|晚送到|比預計送達時間晚|超過預約.{0,8}(半小時|[0-9]+分鐘)|訂.{0,8}(快)?七點才來|等餐點等了.{0,8}(分鐘|小時)|實際送達.{0,12}(晚|才)|配送時間未依指定時間|外送時間不如預設|預定.{0,16}實際.{0,16}才到)/i.test(text))addStrong('遲到/配送時效',18);
+ if(/(炸雞不夠好|炸雞覺得沒那麼好吃|放很久的炸雞|口味偏[咸鹹]|酥脆感較遜|穌脆感較遜|無肉汁|沒肉汁|油.{0,8}沒.{0,4}換|炸雞.{0,12}(黑|軟|不酥脆)|死鹹|乾巴巴)/i.test(text))addStrong('餐點品質',17);
+ if(/(主餐變.{0,8}(紙包雞|漢堡)|一杯飲料.{0,12}一杯冰塊|少冰.{0,12}(正常|一樣多)|四盒.{0,12}(沒有做任何|沒有記號)|飲料.{0,8}(沒有記號|沒記號))/i.test(text))addStrong('錯餐/品項錯誤',18);
+ if(/(薯條.{0,8}(沒看到|沒有|沒收到)|刀叉.{0,8}(手套)?.{0,12}(沒有|都沒有)|沒有紙巾|沒紙巾|800FREE.{0,16}(沒有收到|沒收到).{0,8}(蛋塔|蛋撻))/i.test(text))addStrong('漏餐/缺品',18);
+ if(/(缺貨|找不到線上訂單.{0,12}(備註|註記)|無法.{0,8}(備註|註記))/i.test(text))addStrong('系統/訂購/優惠',14);
+ if(/(外送員.{0,18}(不送上樓|不送到|要加錢|加200|沒備百鈔|沒零錢|沒有零錢|坐在機車上)|放在.{0,12}(路口|防撞柱)|不願.{0,8}(等|送))/i.test(text))addStrong('服務態度/處理',17);
+ if(/(漢堡.{0,8}(異常迷你|太小|很小))/i.test(text))addStrong('價格/份量',16);
  let main='其他/無法判斷',confidence='低';
  // v8.6 以新版語意規則優先；舊 override 只在新版完全沒有辨識結果時補位，避免舊分類鎖死錯誤。
  if(tags.length){
@@ -187,8 +196,8 @@ function renderIssues(co){let marketCnt=Object.fromEntries(DIMENSION_ORDER.map(d
 function centerStats(all){return Object.entries(groupBy(all,'center')).map(([c,rs])=>{let valid=rs.filter(r=>r.score!==null),lo=valid.filter(r=>r.isLow),co=lo.filter(r=>r.hasComment),main=topMain(co);return{c,survey:valid.length,low:lo.length,rate:pct(lo.length,valid.length),share:0,main,dimension:dimensionOf(main)}}).map(x=>({...x,share:pct(x.low,all.filter(r=>r.isLow).length)})).sort((a,b)=>b.low-a.low)}
 function renderCenters(all){let s=centerStats(all);if(state.globalCenter)s=s.filter(x=>x.c===state.globalCenter);let rows=s.map(x=>[x.c,x.survey,x.low,fmtp(x.rate),fmtp(x.share),x.dimension,x.main]);document.querySelector('#centerTable').innerHTML=table(['中心','問卷數','1～3分','低分率','占市場低分','主要構面','主要問題'],rows);document.querySelector('#centerDetail').innerHTML=`<div class="card">${table(['中心','問卷數','低分件數','低分率','市場低分貢獻','主要構面','主要問題'],rows)}</div>`}
 function topMain(co){let m={};for(const r of co)m[r.main]=(m[r.main]||0)+1;return Object.entries(m).sort((a,b)=>b[1]-a[1])[0]?.[0]||'-'}
-function restaurantStats(all){return Object.entries(groupBy(all,'restaurant')).map(([name,rs])=>{let valid=rs.filter(r=>r.score!==null),lo=valid.filter(r=>r.isLow),co=lo.filter(r=>r.hasComment);return{name,center:rs.find(r=>r.center)?.center||'未對應',group:rs.find(r=>r.group)?.group||'',survey:valid.length,low:lo.length,rate:pct(lo.length,valid.length),one:lo.filter(r=>r.score===1).length,main:topMain(co),dimension:dimensionOf(topMain(co))}}).filter(x=>x.low).sort((a,b)=>(b.low-a.low)||(b.rate-a.rate))}
-function renderRestaurants(all){let rs=restaurantStats(centerFiltered(all));if(state.restaurantRank==='rate')rs.sort((a,b)=>(b.rate-a.rate)||(b.low-a.low));else if(state.restaurantRank==='one')rs.sort((a,b)=>(b.one-a.one)||(b.low-a.low));else if(state.restaurantRank==='missing'){const miss=comments().filter(r=>(r.main==='漏餐/缺品'||r.tags.includes('漏餐/缺品'))&&( !state.globalCenter||r.center===state.globalCenter));const mc={};miss.forEach(r=>mc[r.restaurant]=(mc[r.restaurant]||0)+1);rs.sort((a,b)=>(mc[b.name]||0)-(mc[a.name]||0)||(b.low-a.low));}else rs.sort((a,b)=>(b.low-a.low)||(b.rate-a.rate));document.querySelector('#restaurantTable').innerHTML=`<div class="card"><div class="scroll">${table(['排名','中心','Group','餐廳','問卷數','低分件數','低分率','1分','主要構面','主要問題'],rs.map((x,i)=>[i+1,x.center,x.group,x.name,x.survey,x.low,fmtp(x.rate),x.one,x.dimension,x.main]))}</div></div>`}
+function restaurantStats(all){return Object.entries(groupBy(all,'restaurant')).map(([name,rs])=>{let valid=rs.filter(r=>r.score!==null),lo=valid.filter(r=>r.isLow),co=lo.filter(r=>r.hasComment&&!r.positiveOnly);let dim={速度:0,品質:0,正確性:0,外送異常:0,其他:0};for(const r of co){let d=r.dimension||dimensionOf(r.main);if(d==='速度')dim.速度++;else if(d==='品質')dim.品質++;else if(d==='正確性')dim.正確性++;else if(d==='外送異常')dim.外送異常++;else dim.其他++;}let main=topMain(co);return{name,center:rs.find(r=>r.center)?.center||'未對應',group:rs.find(r=>r.group)?.group||'',survey:valid.length,low:lo.length,problem:co.length,rate:pct(lo.length,valid.length),one:lo.filter(r=>r.score===1).length,speed:dim.速度,quality:dim.品質,accuracy:dim.正確性,delivery:dim.外送異常,other:dim.其他,main,dimension:dimensionOf(main)}}).filter(x=>x.low).sort((a,b)=>(b.low-a.low)||(b.rate-a.rate))}
+function renderRestaurants(all){let rs=restaurantStats(centerFiltered(all));if(state.restaurantRank==='rate')rs.sort((a,b)=>(b.rate-a.rate)||(b.low-a.low));else if(state.restaurantRank==='one')rs.sort((a,b)=>(b.one-a.one)||(b.low-a.low));else if(state.restaurantRank==='missing'){const miss=comments().filter(r=>(r.main==='漏餐/缺品'||r.tags.includes('漏餐/缺品'))&&( !state.globalCenter||r.center===state.globalCenter));const mc={};miss.forEach(r=>mc[r.restaurant]=(mc[r.restaurant]||0)+1);rs.sort((a,b)=>(mc[b.name]||0)-(mc[a.name]||0)||(b.low-a.low));}else rs.sort((a,b)=>(b.low-a.low)||(b.rate-a.rate));document.querySelector('#restaurantTable').innerHTML=`<div class="card"><div class="scroll">${table(['排名','中心','Group','餐廳','問卷數','低分件數','問題件數','低分率','1分','速度','品質','正確性','外送異常','其他','主要問題'],rs.map((x,i)=>[i+1,x.center,x.group,x.name,x.survey,x.low,x.problem,fmtp(x.rate),x.one,x.speed,x.quality,x.accuracy,x.delivery,x.other,x.main]))}</div></div>`}
 function renderMissing(co){
  const all=current();
  let miss=co.filter(r=>r.main==='漏餐/缺品'||r.tags.includes('漏餐/缺品'));
