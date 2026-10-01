@@ -231,6 +231,21 @@ function table(headers,rows){return `<table><thead><tr>${headers.map(h=>`<th>${h
 function exportAnalysis(){let rs=restaurantStats(current()),co=comments();let wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rs),'餐廳分析');XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(co.map(r=>({中心:r.center,Group:r.group,餐廳:r.restaurant,分數:r.score,主要構面:r.dimension||dimensionOf(r.main),主要不滿:r.main,問題標籤:r.tags.join('、'),漏餐品項:r.items.join('、'),評論:r.comment}))),'評論明細');XLSX.writeFile(wb,`GES分析_${state.month||'未指定'}.xlsx`)}
 function toast(t){let e=document.querySelector('#toast');e.textContent=t;e.style.display='block';setTimeout(()=>e.style.display='none',2600)}
 
+async function readWorkbook(file){
+  const data=await file.arrayBuffer();
+  const wb=XLSX.read(data,{type:'array',cellDates:true});
+  let best=[];
+  for(const sn of wb.SheetNames){
+    const ws=wb.Sheets[sn];
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
+    if(rows.length>best.length)best=rows;
+    // 客訴/第三方報表可能在第一列前有報表標題；找到像資料表的工作表就優先使用。
+    const hasHeader=rows.some(r=>{const h=r.map(norm);return findCol(h,['日期','進線時間','建立時間','發生時間','落單時間'])>=0 && (findCol(h,['顧客回饋內容','顧客意見','回饋內容','內容'])>=0 || findCol(h,['訂購號碼','訂單編號'])>=0)});
+    if(hasHeader)return rows;
+  }
+  if(!best.length)throw new Error('Excel 內沒有可讀取的資料');
+  return best;
+}
 function dateParts(v){let d=v instanceof Date?v:null;if(!d&&typeof v==='number'&&window.XLSX){let x=XLSX.SSF.parse_date_code(v);if(x)d=new Date(x.y,x.m-1,x.d,x.H||0,x.M||0,x.S||0)}if(!d){let z=norm(v).replace(/年|月/g,'/').replace(/日/g,'');let q=new Date(z);if(!isNaN(q))d=q}if(!d)return {date:norm(v),day:'',hour:null,month:''};return {date:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`,day:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`,hour:d.getHours(),month:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`}}
 function mealPeriod(h){if(h===null||h===undefined)return '無時間';if(h<11)return '11:00前';if(h<14)return '午餐';if(h<17)return '下午';if(h<21)return '晚餐';return '消夜'}
 function renderGesTime(){let old=document.querySelector('#gesTimeAnalysis');if(!old){old=document.createElement('div');old.id='gesTimeAnalysis';document.querySelector('#issue').appendChild(old)}let rs=centerFiltered(comments()).filter(r=>r.date);let days={};let hours={};for(const r of rs){let p=dateParts(r.date);if(p.day)days[p.day]=(days[p.day]||0)+1;if(p.hour!==null){let k=`${String(p.hour).padStart(2,'0')}:00–${String((p.hour+1)%24).padStart(2,'0')}:00`;hours[k]=(hours[k]||0)+1}}let dr=Object.entries(days).sort((a,b)=>b[1]-a[1]).slice(0,20).map((x,i)=>[i+1,x[0],x[1]]),hr=Object.entries(hours).sort((a,b)=>b[1]-a[1]).map((x,i)=>[i+1,x[0],x[1]]);old.innerHTML=`<div class="grid2" style="margin-top:16px"><div class="card"><h3>需改善日期</h3>${table(['排名','日期','低分評論'],dr)}</div><div class="card"><h3>需改善時段</h3>${hr.length?table(['排名','時段','低分評論'],hr):'<div class="empty">GES 原始日期若沒有時間，無法判斷實際時段。</div>'}</div></div>`}
