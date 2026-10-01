@@ -1,8 +1,8 @@
-const APP_VERSION='v8.15';
+const APP_VERSION='v8.16';
 const SUPABASE_URL='https://piccgvophhtnmggwwobn.supabase.co';
 const SUPABASE_KEY='sb_publishable_2SPa8TbrgAhbglUKdk3VGg_9DvRriFP';
 const GES_TABLE='ges_responses';
-const state={months:{},month:'',chart:null,globalCenter:'',restaurantRank:'low',missingRank:'count',complaints:[],thirdParty:[],complaintSource:'all',complaintCenter:'',complaintRestaurantCode:'',availableMonths:[],monthsLoaded:false,auxByMonth:{},complaintSummary:null,tcRows:null,complaintTrendChart:null,trendMetric:'rate',trendIssue:'all'};
+const state={months:{},month:'',chart:null,globalCenter:'',restaurantRank:'low',missingRank:'count',complaints:[],thirdParty:[],complaintSource:'all',complaintCenter:'',complaintRestaurantCode:'',availableMonths:[],monthsLoaded:false,auxByMonth:{},complaintSummary:null,tcRows:null,complaintTrendChart:null,trendMetric:'rate',trendIssue:'all',centerCompareSource:'all'};
 const RESTAURANT_MAPPING = window.RESTAURANT_MAPPING || {};
 const CLASSIFICATION_OVERRIDES = window.CLASSIFICATION_OVERRIDES || {};
 function applyMapping(row){const m=RESTAURANT_MAPPING[norm(row.restaurant)];if(m){row.restaurant_code=row.restaurant_code||m.code||'';row.center=m.center||row.center||'';row.group=m.group||row.group||'';}else{row.center=row.center||'未對應';}return row;}
@@ -380,6 +380,28 @@ function centerRateRows(month){
     return{center,tc,n080,n4128,total,r080,r4128,rate,prev,prevRate,change};
   });
 }
+function centerComparisonData(source='all'){
+  const months=[...new Set((state.complaintSummary||[]).map(r=>r.report_month).concat((state.tcRows||[]).map(r=>r.report_month)))].sort();
+  return months.map(month=>{
+    const row={month};
+    for(const center of SIX_CENTERS){
+      const tc=tcFor(month,center),count=complaintCountFor(month,center,source,state.trendIssue);
+      row[center]=tc?count/tc*10000:null;
+    }
+    return row;
+  });
+}
+function centerCompareLabel(source){return source==='080'?'080萬單抱怨率':source==='4128'?'4128萬單抱怨率':'080＋4128合計萬單抱怨率'}
+function renderCenterComparison(){
+  const wrap=document.querySelector('#centerCompareWrap');if(!wrap)return;
+  const source=state.centerCompareSource||'all',data=centerComparisonData(source),label=centerCompareLabel(source);
+  wrap.innerHTML=`<div class="filters page-filters"><label>六中心比較指標 <select id="centerCompareSource"><option value="080">080萬單率</option><option value="4128">4128萬單率</option><option value="all">080＋4128合計萬單率</option></select></label></div><div style="height:360px"><canvas id="centerCompareChart"></canvas></div><div style="margin-top:12px">${table(['月份',...SIX_CENTERS],data.map(r=>[r.month,...SIX_CENTERS.map(c=>r[c]==null?'—':r[c].toFixed(2))]))}</div>`;
+  document.querySelector('#centerCompareSource').value=source;
+  document.querySelector('#centerCompareSource').onchange=e=>{state.centerCompareSource=e.target.value;renderCenterComparison()};
+  if(state.centerCompareChart)state.centerCompareChart.destroy();
+  const cv=document.querySelector('#centerCompareChart');
+  if(cv&&data.length){state.centerCompareChart=new Chart(cv,{type:'line',data:{labels:data.map(x=>x.month),datasets:SIX_CENTERS.map(center=>({label:center,data:data.map(x=>x[center]),tension:.25,spanGaps:true}))},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{display:true}},scales:{y:{beginAtZero:true,title:{display:true,text:'每萬單抱怨件數'}}}}})}
+}
 function renderComplaintTrend(){
   const box=document.querySelector('#complaintTrendArea');if(!box)return;
   const data=aggregateComplaintTrend(),metric=state.trendMetric;
@@ -394,7 +416,8 @@ function renderComplaintTrend(){
     x.r080==null?'—':x.r080.toFixed(2),x.r4128==null?'—':x.r4128.toFixed(2),x.rate==null?'—':x.rate.toFixed(2),
     x.prevRate==null?'—':x.prevRate.toFixed(2),x.change==null?'—':`${x.change>0?'+':''}${x.change.toFixed(2)} ${x.change<0?'↓':x.change>0?'↑':'—'}`
   ]));
-  box.innerHTML=`<div class="card"><h3>${esc(compareMonth||'')}｜各中心萬單抱怨率</h3><p>萬單抱怨率＝抱怨件數 ÷ 該中心外送TC × 10,000；全市場採總抱怨 ÷ 總TC，不使用六中心平均。</p>${centerTable}</div><div class="card" style="margin-top:16px"><div class="filters page-filters"><label>趨勢指標 <select id="complaintTrendMetric"><option value="rate">萬單抱怨率</option><option value="count">抱怨件數</option></select></label><label>問題 <select id="complaintTrendIssue"><option value="all">全部問題</option>${['速度','品質','正確性','外送異常','服務/處理','系統/訂購','價格/份量','其他'].map(x=>`<option>${x}</option>`).join('')}</select></label><button id="manageTcBtn">TC資料管理</button><button id="backfillTrendBtn">同步歷史趨勢</button></div><div class="kpi-grid">${kpi(metric==='rate'?'本月萬單抱怨率':'本月抱怨件數',latest?fmt(latestVal):'—',latest?.month||'尚無趨勢資料')}${kpi('上月',prev?fmt(prevVal):'—',prev?.month||'')}${kpi('較上月',deltaPct==null?'—':`${deltaPct>0?'+':''}${deltaPct.toFixed(1)}%`,deltaPct==null?'資料不足':deltaPct<0?'下降＝改善':'上升＝需關注')}</div><div style="height:320px"><canvas id="complaintTrendChart"></canvas></div><div style="margin-top:12px">${table(['月份','抱怨件數','外送TC','萬單抱怨率'],data.map(x=>[x.month,x.count,x.tc||'未輸入',x.rate==null?'—':x.rate.toFixed(2)]))}</div></div>`;
+  box.innerHTML=`<div class="card"><h3>${esc(compareMonth||'')}｜各中心萬單抱怨率</h3><p>萬單抱怨率＝抱怨件數 ÷ 該中心外送TC × 10,000；全市場採總抱怨 ÷ 總TC，不使用六中心平均。</p>${centerTable}</div><div class="card" style="margin-top:16px"><h3>六中心月趨勢比較</h3><p>同一張圖比較台北、新北、桃園、台中、台南、高雄；可切換 080、4128 或兩者合計的萬單抱怨率。</p><div id="centerCompareWrap"></div></div><div class="card" style="margin-top:16px"><h3>單一中心／全市場趨勢</h3><div class="filters page-filters"><label>趨勢指標 <select id="complaintTrendMetric"><option value="rate">萬單抱怨率</option><option value="count">抱怨件數</option></select></label><label>問題 <select id="complaintTrendIssue"><option value="all">全部問題</option>${['速度','品質','正確性','外送異常','服務/處理','系統/訂購','價格/份量','其他'].map(x=>`<option>${x}</option>`).join('')}</select></label><button id="manageTcBtn">TC資料管理</button><button id="backfillTrendBtn">同步歷史趨勢</button></div><div class="kpi-grid">${kpi(metric==='rate'?'本月萬單抱怨率':'本月抱怨件數',latest?fmt(latestVal):'—',latest?.month||'尚無趨勢資料')}${kpi('上月',prev?fmt(prevVal):'—',prev?.month||'')}${kpi('較上月',deltaPct==null?'—':`${deltaPct>0?'+':''}${deltaPct.toFixed(1)}%`,deltaPct==null?'資料不足':deltaPct<0?'下降＝改善':'上升＝需關注')}</div><div style="height:320px"><canvas id="complaintTrendChart"></canvas></div><div style="margin-top:12px">${table(['月份','抱怨件數','外送TC','萬單抱怨率'],data.map(x=>[x.month,x.count,x.tc||'未輸入',x.rate==null?'—':x.rate.toFixed(2)]))}</div></div>`;
+  renderCenterComparison();
   document.querySelector('#complaintTrendMetric').value=metric;document.querySelector('#complaintTrendIssue').value=state.trendIssue;
   document.querySelector('#complaintTrendMetric').onchange=e=>{state.trendMetric=e.target.value;renderComplaintTrend()};
   document.querySelector('#complaintTrendIssue').onchange=e=>{state.trendIssue=e.target.value;renderComplaintTrend()};
