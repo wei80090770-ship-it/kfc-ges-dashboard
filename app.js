@@ -1,4 +1,4 @@
-const APP_VERSION='v8.14';
+const APP_VERSION='v8.15';
 const SUPABASE_URL='https://piccgvophhtnmggwwobn.supabase.co';
 const SUPABASE_KEY='sb_publishable_2SPa8TbrgAhbglUKdk3VGg_9DvRriFP';
 const GES_TABLE='ges_responses';
@@ -363,14 +363,38 @@ function aggregateComplaintTrend(){
     return{month,count,tc,rate:tc?count/tc*10000:null};
   });
 }
+function complaintCountFor(month,center,source='all',issue='all'){
+  return (state.complaintSummary||[]).filter(r=>r.report_month===month&&(!center||r.center===center)&&(source==='all'||r.source_type===source)&&(issue==='all'||r.issue_group===issue)).reduce((a,r)=>a+Number(r.complaint_count||0),0);
+}
+function tcFor(month,center=''){
+  return (state.tcRows||[]).filter(r=>r.report_month===month&&(!center||r.center===center)).reduce((a,r)=>a+Number(r.delivery_tc||0),0);
+}
+function centerRateRows(month){
+  if(!month)return[];
+  const prev=[...new Set((state.complaintSummary||[]).map(r=>r.report_month).concat((state.tcRows||[]).map(r=>r.report_month)))].filter(m=>m<month).sort().at(-1)||'';
+  return SIX_CENTERS.map(center=>{
+    const tc=tcFor(month,center),n080=complaintCountFor(month,center,'080','all'),n4128=complaintCountFor(month,center,'4128','all'),total=n080+n4128;
+    const r080=tc?n080/tc*10000:null,r4128=tc?n4128/tc*10000:null,rate=tc?total/tc*10000:null;
+    const ptc=prev?tcFor(prev,center):0,ptotal=prev?complaintCountFor(prev,center,'all','all'):0,prevRate=ptc?ptotal/ptc*10000:null;
+    const change=(rate!=null&&prevRate!=null)?rate-prevRate:null;
+    return{center,tc,n080,n4128,total,r080,r4128,rate,prev,prevRate,change};
+  });
+}
 function renderComplaintTrend(){
   const box=document.querySelector('#complaintTrendArea');if(!box)return;
   const data=aggregateComplaintTrend(),metric=state.trendMetric;
-  let latest=data.at(-1),prev=data.at(-2),change=(latest&&prev)?((metric==='rate'?latest.rate:latest.count)-(metric==='rate'?prev.rate:prev.count)):null;
+  let latest=data.at(-1),prev=data.at(-2);
   const latestVal=latest?(metric==='rate'?latest.rate:latest.count):null,prevVal=prev?(metric==='rate'?prev.rate:prev.count):null;
   const deltaPct=latestVal!=null&&prevVal?((latestVal-prevVal)/prevVal*100):null;
   const fmt=v=>metric==='rate'?(v==null?'—':v.toFixed(2)):Number(v||0).toLocaleString();
-  box.innerHTML=`<div class="card"><div class="filters page-filters"><label>趨勢指標 <select id="complaintTrendMetric"><option value="rate">萬單抱怨率</option><option value="count">抱怨件數</option></select></label><label>問題 <select id="complaintTrendIssue"><option value="all">全部問題</option>${['速度','品質','正確性','外送異常','服務/處理','系統/訂購','價格/份量','其他'].map(x=>`<option>${x}</option>`).join('')}</select></label><button id="manageTcBtn">TC資料管理</button><button id="backfillTrendBtn">同步歷史趨勢</button></div><div class="kpi-grid">${kpi(metric==='rate'?'本月萬單抱怨率':'本月抱怨件數',latest?fmt(latestVal):'—',latest?.month||'尚無趨勢資料')}${kpi('上月',prev?fmt(prevVal):'—',prev?.month||'')}${kpi('較上月',deltaPct==null?'—':`${deltaPct>0?'+':''}${deltaPct.toFixed(1)}%`,deltaPct==null?'資料不足':deltaPct<0?'下降＝改善':'上升＝需關注')}</div><div style="height:320px"><canvas id="complaintTrendChart"></canvas></div><div style="margin-top:12px">${table(['月份','抱怨件數','外送TC','萬單抱怨率'],data.map(x=>[x.month,x.count,x.tc||'未輸入',x.rate==null?'—':x.rate.toFixed(2)]))}</div></div>`;
+  const compareMonth=state.month||latest?.month||'';
+  const centerRows=centerRateRows(compareMonth);
+  const centerTable=table(['中心','外送TC','080','4128','合計','080萬單率','4128萬單率','合計萬單率','上月合計率','較上月'],centerRows.map(x=>[
+    x.center,x.tc?x.tc.toLocaleString():'未輸入',x.n080,x.n4128,x.total,
+    x.r080==null?'—':x.r080.toFixed(2),x.r4128==null?'—':x.r4128.toFixed(2),x.rate==null?'—':x.rate.toFixed(2),
+    x.prevRate==null?'—':x.prevRate.toFixed(2),x.change==null?'—':`${x.change>0?'+':''}${x.change.toFixed(2)} ${x.change<0?'↓':x.change>0?'↑':'—'}`
+  ]));
+  box.innerHTML=`<div class="card"><h3>${esc(compareMonth||'')}｜各中心萬單抱怨率</h3><p>萬單抱怨率＝抱怨件數 ÷ 該中心外送TC × 10,000；全市場採總抱怨 ÷ 總TC，不使用六中心平均。</p>${centerTable}</div><div class="card" style="margin-top:16px"><div class="filters page-filters"><label>趨勢指標 <select id="complaintTrendMetric"><option value="rate">萬單抱怨率</option><option value="count">抱怨件數</option></select></label><label>問題 <select id="complaintTrendIssue"><option value="all">全部問題</option>${['速度','品質','正確性','外送異常','服務/處理','系統/訂購','價格/份量','其他'].map(x=>`<option>${x}</option>`).join('')}</select></label><button id="manageTcBtn">TC資料管理</button><button id="backfillTrendBtn">同步歷史趨勢</button></div><div class="kpi-grid">${kpi(metric==='rate'?'本月萬單抱怨率':'本月抱怨件數',latest?fmt(latestVal):'—',latest?.month||'尚無趨勢資料')}${kpi('上月',prev?fmt(prevVal):'—',prev?.month||'')}${kpi('較上月',deltaPct==null?'—':`${deltaPct>0?'+':''}${deltaPct.toFixed(1)}%`,deltaPct==null?'資料不足':deltaPct<0?'下降＝改善':'上升＝需關注')}</div><div style="height:320px"><canvas id="complaintTrendChart"></canvas></div><div style="margin-top:12px">${table(['月份','抱怨件數','外送TC','萬單抱怨率'],data.map(x=>[x.month,x.count,x.tc||'未輸入',x.rate==null?'—':x.rate.toFixed(2)]))}</div></div>`;
   document.querySelector('#complaintTrendMetric').value=metric;document.querySelector('#complaintTrendIssue').value=state.trendIssue;
   document.querySelector('#complaintTrendMetric').onchange=e=>{state.trendMetric=e.target.value;renderComplaintTrend()};
   document.querySelector('#complaintTrendIssue').onchange=e=>{state.trendIssue=e.target.value;renderComplaintTrend()};
@@ -380,10 +404,11 @@ function renderComplaintTrend(){
   const cv=document.querySelector('#complaintTrendChart');if(cv&&data.length){state.complaintTrendChart=new Chart(cv,{type:'line',data:{labels:data.map(x=>x.month),datasets:[{label:metric==='rate'?'萬單抱怨率':'抱怨件數',data:data.map(x=>metric==='rate'?x.rate:x.count),tension:.25,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:true}},scales:{y:{beginAtZero:true}}}})}
 }
 async function refreshComplaintTrend(){try{await loadComplaintTrendData();renderComplaintTrend()}catch(e){const box=document.querySelector('#complaintTrendArea');if(box)box.innerHTML=`<div class="card empty">趨勢資料尚未啟用：${esc(e.message)}<br>請先執行 v8.14 的 Supabase SQL。</div>`}}
-function renderTcManager(){
-  const box=document.querySelector('#complaintTrendArea');if(!box)return;const month=state.month||new Date().toISOString().slice(0,7);const map=Object.fromEntries((state.tcRows||[]).filter(x=>x.report_month===month).map(x=>[x.center,x.delivery_tc]));
+function renderTcManager(){renderTcManagerMonth(state.month||new Date().toISOString().slice(0,7))}
+function renderTcManagerMonth(month){
+  const box=document.querySelector('#complaintTrendArea');if(!box)return;const map=Object.fromEntries((state.tcRows||[]).filter(x=>x.report_month===month).map(x=>[x.center,x.delivery_tc]));
   box.innerHTML=`<div class="card"><h3>TC資料管理｜${esc(month)}</h3><p>每個月份每中心只保存一筆；再次儲存會直接更新，不會新增重複資料。</p><div class="filters page-filters"><label>月份 <input id="tcMonth" type="month" value="${esc(month)}"></label><button id="importTcBtn">匯入 TC Excel</button><input id="fileTc" type="file" accept=".xlsx,.xls,.csv" hidden></div>${table(['中心','外送TC'],SIX_CENTERS.map(c=>[c,`__TC_${c}__`])).replace(/__TC_([^<]+)__/g,(_,c)=>`<input class="tc-input" data-center="${c}" type="number" min="0" step="1" value="${map[c]??''}" style="width:140px">`)}<div style="margin-top:14px"><button id="saveTcBtn" class="primary">儲存 TC</button> <button id="cancelTcBtn">返回趨勢</button></div></div>`;
-  document.querySelector('#saveTcBtn').onclick=saveTcInputs;document.querySelector('#cancelTcBtn').onclick=renderComplaintTrend;document.querySelector('#importTcBtn').onclick=()=>document.querySelector('#fileTc').click();document.querySelector('#fileTc').onchange=e=>e.target.files[0]&&importTcExcel(e.target.files[0]).catch(x=>alert(x.message));
+  document.querySelector('#tcMonth').onchange=e=>renderTcManagerMonth(e.target.value);document.querySelector('#saveTcBtn').onclick=saveTcInputs;document.querySelector('#cancelTcBtn').onclick=renderComplaintTrend;document.querySelector('#importTcBtn').onclick=()=>document.querySelector('#fileTc').click();document.querySelector('#fileTc').onchange=e=>e.target.files[0]&&importTcExcel(e.target.files[0]).catch(x=>alert(x.message));
 }
 async function saveTcInputs(){const month=document.querySelector('#tcMonth').value;if(!month)return alert('請選月份');const rows=[...document.querySelectorAll('.tc-input')].map(x=>({report_month:month,center:x.dataset.center,delivery_tc:Number(x.value||0),updated_at:new Date().toISOString()})).filter(x=>x.delivery_tc>0);if(!rows.length)return alert('請至少輸入一個中心 TC');await api(`${DELIVERY_TC_TABLE}?on_conflict=report_month,center`,{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(rows)});state.tcRows=null;await loadComplaintTrendData(true);toast('TC 已儲存');renderComplaintTrend()}
 async function importTcExcel(file){const a=await readWorkbook(file);let hi=a.findIndex(r=>{let h=r.map(norm);return findCol(h,['月份','年月','month'])>=0&&findCol(h,['中心','外送中心'])>=0&&findCol(h,['TC','外送TC','訂單數'])>=0});if(hi<0)throw new Error('TC Excel 需包含：月份、中心、TC');let h=a[hi].map(norm),mi=findCol(h,['月份','年月','month']),ci=findCol(h,['中心','外送中心']),ti=findCol(h,['TC','外送TC','訂單數']);let rows=[];for(const r of a.slice(hi+1)){let center=normalizeCenterName(r[ci]),tc=Number(String(r[ti]??'').replace(/,/g,''));let m=norm(r[mi]).match(/(20\d{2})[-\/.年]?(\d{1,2})/);if(center&&m&&Number.isFinite(tc)&&tc>0)rows.push({report_month:`${m[1]}-${m[2].padStart(2,'0')}`,center,delivery_tc:tc,updated_at:new Date().toISOString()})}if(!rows.length)throw new Error('沒有可匯入的 TC 資料');await api(`${DELIVERY_TC_TABLE}?on_conflict=report_month,center`,{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(rows)});state.tcRows=null;await loadComplaintTrendData(true);toast(`TC 匯入 ${rows.length} 筆`);renderComplaintTrend()}
