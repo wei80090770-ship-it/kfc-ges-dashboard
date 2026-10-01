@@ -277,13 +277,20 @@ async function saveGeneric(tableName,month,file,source,rows){
  for(let i=0;i<batch.length;i+=500)await api(tableName,{method:'POST',headers:{Prefer:'return=minimal,resolution=ignore-duplicates'},body:JSON.stringify(batch.slice(i,i+500))});return{read:rows.length,added:batch.length,duplicateCount}
 }
 async function importComplaint(file,source){
- let a=await readWorkbook(file);let hi=a.findIndex(r=>r.some(c=>['日期','顧客回饋內容','訂單編號'].some(k=>norm(c).includes(k))));if(hi<0)throw new Error('找不到客訴欄位');
+ let a=await readWorkbook(file);
+ // v8.11：報表上方可能有標題/空白列；逐列找真正 Header，不再假設第 1 列。
+ let hi=a.findIndex(r=>{const hh=r.map(norm);return findCol(hh,['日期','進線時間','建立時間','發生時間'])>=0&&findCol(hh,['顧客回饋內容','顧客意見','回饋內容','內容'])>=0&&findCol(hh,['餐廳','餐廳名稱'])>=0});
+ if(hi<0)throw new Error('找不到客訴欄位：請確認檔案內有「日期、餐廳、顧客回饋內容」欄位');
  let h=a[hi].map(norm),date=findCol(h,['日期','進線時間','建立時間','發生時間']),comment=findCol(h,['顧客回饋內容','顧客意見','回饋內容','內容']),restaurant=findCol(h,['餐廳','餐廳名稱']),region=findCol(h,['區域']),type=findCol(h,['被抱怨型態']),order=findCol(h,['訂單編號','訂單號碼']);
- let channel=findAnyCol(h,['消費型態','消費方式','訂購方式','訂購型態','訂餐方式','通路','服務類型','訂單類型','來源']);let feedback=findAnyCol(h,['建議種類','意見類型','意見分類','案件類型','案件分類','回饋類型','反映類型','反應類型','類別']);
+ // 080 正式規則：建議種類=抱怨 AND 被抱怨型態=網路外送。
+ // 舊格式才使用其他通路欄位作 fallback；絕不把「來源」誤當成通路。
+ let feedback=findAnyCol(h,['建議種類','意見類型','意見分類','案件類型','案件分類','回饋類型','反映類型','反應類型','類別']);
+ let channel=source==='080'&&type>=0?type:findAnyCol(h,['消費型態','消費方式','訂購方式','訂購型態','訂餐方式','通路','服務類型','訂單類型']);
  let base=a.slice(hi+1).filter(r=>norm(r[comment])||norm(r[restaurant]));
  if(source==='080'){
-   if(channel<0||feedback<0)throw new Error('080 找不到「網路外送」或「抱怨/建議/表揚」欄位，為避免誤算已停止匯入。');
+   if(channel<0||feedback<0)throw new Error('080 找不到「被抱怨型態」或「建議種類」欄位，為避免誤算已停止匯入。');
    base=base.filter(r=>norm(r[channel]).includes('網路外送')&&norm(r[feedback]).includes('抱怨'));
+   if(!base.length)throw new Error('080 找到欄位，但沒有「建議種類=抱怨＋被抱怨型態=網路外送」的有效資料。');
  }
  let rows=base.map(r=>{let p=dateParts(r[date]);return{month:p.month,date:p.date,restaurant:restaurant>=0?norm(r[restaurant]):'',region:region>=0?norm(r[region]):'',center:'',complaintType:type>=0?norm(r[type]):'',orderNo:order>=0?norm(r[order]):'',restaurantCode:order>=0?(normalizeOrder(r[order]).match(/^(\d{3})-/)?.[1]||''):'',comment:comment>=0?norm(r[comment]):'',channel:channel>=0?norm(r[channel]):'',feedbackType:feedback>=0?norm(r[feedback]):''}});
  let month=rows.find(r=>r.month)?.month||prompt('請輸入月份，例如 2026-08','2026-08');if(!month)return;rows.forEach(r=>r.month=month);let result=await saveGeneric('complaint_records',month,file.name,source,rows);await loadAuxCloud(month);toast(`${source}：有效讀取 ${result.read} 筆｜新增 ${result.added} 筆｜重複排除 ${result.duplicateCount} 筆`)
