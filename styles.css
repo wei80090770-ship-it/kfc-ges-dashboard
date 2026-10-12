@@ -7,3 +7,14 @@
 .kpi-table tr.market-total td{background:#ffff00;font-weight:700}
 .kpi-table .below{color:#e02020}
 .kpi-report{max-width:850px;margin:0 auto 8px}
+
+/* 080／4128 月報樣式 */
+.ges-month-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.ges-month-head h3{margin:0}
+.ges-month-report{overflow-x:auto;margin-top:12px}
+.ges-month-title{min-width:650px;background:#c8f0cd;border:1px solid #111;border-bottom:0;text-align:center;font-size:18px;padding:3px}
+.ges-month-table{width:100%;min-width:650px;border-collapse:collapse;background:white}
+.ges-month-table th,.ges-month-table td{border:1px solid #111;padding:6px 9px;text-align:center;white-space:nowrap}
+.ges-month-table th{background:#f2dedc;font-weight:normal}
+.ges-month-table td:first-child{text-align:left}
+.ges-month-table tr.ges-month-total td{background:#ffef00;font-weight:bold}
