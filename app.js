@@ -55,14 +55,15 @@ function reviewCandidates(){
 function renderReview(){
  const root=document.querySelector('#reviewContent');if(!root)return;
  const all=reviewCandidates(),bySource={GES:0,'080':0,'4128':0};all.forEach(x=>bySource[x.source]=(bySource[x.source]||0)+1);
- root.innerHTML=`<div class="card"><h3>分類例外管理｜${esc(state.month||'尚未選擇月份')}</h3><p>只列出低信心、多重問題或其他分類；每筆僅有一個主要構面。人工修正保存在本瀏覽器，換電腦請匯出／匯入修正檔。</p><p>待確認：GES ${bySource.GES||0} 筆｜080 ${bySource['080']||0} 筆｜4128 ${bySource['4128']||0} 筆</p><button id="reviewExport">匯出修正 JSON</button> <button id="reviewImport">匯入修正 JSON</button><input id="reviewFile" type="file" accept=".json" hidden><div class="scroll" style="margin-top:12px">${table(['來源','餐廳','評論摘要','目前主因','信心','修正'],all.map((x,i)=>[x.source,x.restaurant,esc(x.comment.slice(0,85)),esc(x.result.dimension),x.result.confidence,`<button data-review="${i}">確認／修改</button>`]))}</div></div>`;
+ root.innerHTML=`<div class="card"><h3>分類例外管理｜${esc(state.month||'尚未選擇月份')}</h3><p>只列出低信心、多重問題或其他分類；每筆僅有一個主要構面。人工修正保存在本瀏覽器，換電腦請匯出／匯入修正檔。</p><p>待確認：GES ${bySource.GES||0} 筆｜080 ${bySource['080']||0} 筆｜4128 ${bySource['4128']||0} 筆</p><button id="reviewExport">匯出修正 JSON</button> <button id="reviewImport">匯入修正 JSON</button><input id="reviewFile" type="file" accept=".json" hidden><div class="scroll" style="margin-top:12px">${table(['來源','餐廳','評論摘要','目前主因','信心','修正'],all.map((x,i)=>[x.source,x.restaurant,esc(x.comment.slice(0,85)),esc(x.result.dimension),x.result.confidence,'確認／修改']))}</div></div>`;
+ root.querySelectorAll('tbody tr').forEach((tr,i)=>{const cell=tr.lastElementChild;if(!cell||!all[i])return;cell.textContent='';const btn=document.createElement('button');btn.type='button';btn.dataset.review=String(i);btn.textContent='確認／修改';cell.appendChild(btn)});
  root.querySelectorAll('[data-review]').forEach(b=>b.onclick=()=>{
-  const x=all[Number(b.dataset.review)];if(!x)return;
+  if(!authSession?.user||authSession.user.id!=='f75f1b3d-39d5-4f4b-b211-7f423ffa8357')return alert('只有 OP 可以修改分類');const x=all[Number(b.dataset.review)];if(!x)return;
   const choices=ISSUE_ORDER.filter(k=>dimensionOf(k)!=='其他'||k==='其他/無法判斷');
   const msg='請輸入主要問題編號（每筆只計一次）：\n'+choices.map((k,i)=>`${i+1}. ${k}（${dimensionOf(k)}）`).join('\n')+'\n\n'+x.comment.slice(0,180);
   const n=Number(prompt(msg,String(Math.max(0,choices.indexOf(x.result.main))+1)));
   if(!Number.isInteger(n)||n<1||n>choices.length)return;
-  reviewOverrides[norm(x.comment)]={main:choices[n]};saveReview();refreshReviewedData();
+  reviewOverrides[norm(x.comment)]={main:choices[n-1]};saveReview();refreshReviewedData();
  });
  root.querySelector('#reviewExport').onclick=()=>{const blob=new Blob([JSON.stringify(reviewOverrides,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='GES_分類人工修正.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),500)};
  root.querySelector('#reviewImport').onclick=()=>root.querySelector('#reviewFile').click();

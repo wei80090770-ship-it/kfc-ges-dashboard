@@ -33,11 +33,11 @@
 <section id="storage" class="page"><div class="page-title"><div><h1>資料管理與清除</h1><p>只有 OP 可刪除；先檢視數量、匯出備份、再二次確認。</p></div></div><div id="storageAdmin" class="card"><label>資料類型 <select id="storageType"><option value="ges_monthly_kpi">GES 月度 KPI</option><option value="ges">GES 評論</option><option value="080">080 客訴</option><option value="4128">4128 客訴</option><option value="third">第三方比對</option></select></label> <label>月份 YYYY-MM <input id="storageMonth" type="month" value="2026-08"></label> <button id="storagePreview">預覽筆數</button><button id="storageBackup">備份該月份 JSON</button><button id="storageDelete" style="color:#b42318" disabled>清除所選月份</button><div id="storageResult" style="margin-top:12px"></div></div><div class="card"><button id="storageCache">清除本機瀏覽器快取</button><p>清除快取不會刪除 Supabase 資料；刪除雲端資料不可復原，請先備份。</p></div></section>
 </main>
 <div id="toast" class="toast"></div>
-<div style="text-align:right;padding:8px 18px 18px;color:#7b8794;font-size:12px">GES Dashboard v8.20 · Auth + IndexedDB Cache</div>
+<div style="text-align:right;padding:8px 18px 18px;color:#7b8794;font-size:12px">GES Dashboard v8.21 · Auth + IndexedDB Cache</div>
 <script src="mapping.js"></script>
 <script src="classification_overrides.js"></script>
 <script src="classification_review_202610.js"></script>
-<script src="app.js?v=8.20"></script>
+<script src="app.js?v=8.21"></script>
 <script src="kpi_seed.js"></script>
-<script src="kpi_management.js?v=8.20"></script>
+<script src="kpi_management.js?v=8.21"></script>
 </body></html>
