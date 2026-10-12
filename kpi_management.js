@@ -17,7 +17,68 @@ function td(v){return v===null||v===undefined?'—':String(v)}
 function renderTable(){let rs=currentRows();$('kpiGrid').innerHTML=`<div class="kpi-report"><div class="kpi-month-title">${chosen().year} M${chosen().month}</div><table class="kpi-table"><thead><tr>${HEAD.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${rs.map(r=>`<tr class="${r.center==='全市場'?'market-total':''}"><td>${r.center}</td>${F.map((f,i)=>`<td class="${i<4&&r[f]!==null&&Number(r[f])<80?'below':''}">${td(r[f])}${i<4&&r[f]!==null?'%':''}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
  if(op()){$('kpiEditor').style.display='block';$('kpiInputs').innerHTML=`<div class="scroll"><table class="kpi-table"><thead><tr>${HEAD.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${rs.map((r,i)=>`<tr><td>${r.center}</td>${F.map((f,j)=>`<td><input type="number" data-ri="${i}" data-field="${f}" min="0" ${j<4?'max="100" step="0.01"':'step="1"'} value="${r[f]??''}" style="width:76px"></td>`).join('')}</tr>`).join('')}</tbody></table></div>`}else $('kpiEditor').style.display='none';
  renderCharts();}
-function line(ctx,old,labels,datasets){if(old)old.destroy();return new Chart(ctx,{type:'line',data:{labels,datasets},options:{responsive:true,plugins:{legend:{position:'bottom'}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{display:true}},x:{grid:{display:true}}}}})}
+
+function line(ctx, old, labels, datasets) {
+  if (old) old.destroy();
+
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets
+    },
+    options: {
+      responsive: true,
+      interaction: {
+        mode: 'index',
+        intersect: false,
+        axis: 'x'
+      },
+      plugins: {
+        legend: {
+          position: 'bottom'
+        },
+        tooltip: {
+          enabled: true,
+          mode: 'index',
+          intersect: false,
+          callbacks: {
+            title: function(items) {
+              return items.length ? items[0].label : '';
+            },
+            label: function(context) {
+              const value = context.parsed.y;
+
+              return context.dataset.label + ': ' +
+                (value === null ? '尚無資料' : value + '%');
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          min: 60,
+          max: 100,
+          ticks: {
+            stepSize: 5,
+            callback: function(value) {
+              return value + '%';
+            }
+          },
+          grid: {
+            display: true
+          }
+        },
+        x: {
+          grid: {
+            display: true
+          }
+        }
+      }
+    }
+  });
+}
+
 function renderCharts(){const year=chosen().year,metric=$('kpiMetric').value,rows=allRows();chart=line($('kpiChart'),chart,Array.from({length:12},(_,i)=>`M${i+1}`),N.slice(0,6).map(c=>({label:c,data:Array.from({length:12},(_,i)=>rows.find(r=>r.year===year&&r.month===i+1&&r.center===c)?.[metric]??null),spanGaps:false,tension:.15})));const center=$('kpiCompareCenter').value;yoy=line($('kpiYoYChart'),yoy,Array.from({length:12},(_,i)=>`M${i+1}`),[year-1,year].map(y=>({label:`${center} ${y}`,data:Array.from({length:12},(_,i)=>rows.find(r=>r.year===y&&r.month===i+1&&r.center===center)?.[metric]??null),tension:.15})));}
 async function load(){try{cloud=await api('ges_monthly_kpi?select=year,month,center,osat,sos,accuracy,taste,responses&order=year.asc,month.asc');loaded=true;msg('已連線 Supabase；2026 M2～M8 尚未儲存的月份會以內建成績顯示。需要長期保存時，請由 OP 逐月儲存。')}catch(e){cloud=[];loaded=false;msg('目前顯示內建 M2～M8 預覽資料；請先在 Supabase SQL Editor 執行 SUPABASE_KPI_SETUP.sql，才能雲端儲存。 '+e.message)}renderTable()}
 async function save(){if(!op())return alert('僅 OP 可修改');if(!loaded)return alert('尚未連接 KPI 資料表，請先執行 SQL');const {year,month}=chosen();const rs=N.map((center,i)=>{let r={year,month,center};for(let f of F){let el=document.querySelector(`#kpiInputs [data-ri="${i}"][data-field="${f}"]`);if(!el.value.trim())throw Error(`${center} 的 ${f} 尚未填寫`);let v=Number(el.value);if(!Number.isFinite(v)||v<0||(f!=='responses'&&v>100)||(f==='responses'&&!Number.isInteger(v)))throw Error(`${center} 的 ${f} 數值不正確`);r[f]=v}return r});try{await api('ges_monthly_kpi?on_conflict=year,month,center',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(rs)});await load();alert('已儲存七筆月度成績')}catch(e){alert(e.message)}}
