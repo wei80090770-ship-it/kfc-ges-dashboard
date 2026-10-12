@@ -1,4 +1,4 @@
-const APP_VERSION='v8.18';
+const APP_VERSION='v8.19';
 const SUPABASE_URL='https://piccgvophhtnmggwwobn.supabase.co';
 const SUPABASE_KEY='sb_publishable_2SPa8TbrgAhbglUKdk3VGg_9DvRriFP';
 const GES_TABLE='ges_responses';
@@ -13,7 +13,7 @@ const ISSUE_DIMENSION={
  '餐點品質':'品質','食安/異物':'品質',
  '包裝/外觀':'外送異常',
  '漏餐/缺品':'正確性','錯餐/品項錯誤':'正確性',
- '外送交付':'服務/處理','服務態度/處理':'服務/處理',
+ '外送交付':'外送異常','服務態度/處理':'外送異常',
  '系統/訂購/優惠':'系統/訂購','價格/份量':'價格/份量',
  '多重問題/主因不明':'其他','其他/無法判斷':'其他','無評論':'其他'
 };
@@ -37,6 +37,41 @@ function hasAny(t,arr){return arr.some(k=>t.includes(k))}
 function findCol(headers,terms){const h=headers.map(x=>norm(x));for(const t of terms){let i=h.findIndex(x=>x===t);if(i>=0)return i}for(const t of terms){let i=h.findIndex(x=>x.includes(t));if(i>=0)return i}return -1}
 function dimensionOf(main){const d=ISSUE_DIMENSION[main]||'其他';return ({'服務/處理':'外送異常','系統/訂購':'其他','價格/份量':'品質'})[d]||d}
 function keywordHits(text,arr){let score=0;for(const k of arr){if(text.includes(k))score+=Math.max(1,Math.min(6,k.length/2));}return score}
+// v8.19: 審核例外儲存在此瀏覽器，可匯出備份並匯入其他裝置。
+const REVIEW_KEY='ges-classification-review-v819';
+let reviewOverrides={};
+try{reviewOverrides=JSON.parse(localStorage.getItem(REVIEW_KEY)||'{}')||{}}catch(e){reviewOverrides={}}
+function saveReview(){localStorage.setItem(REVIEW_KEY,JSON.stringify(reviewOverrides))}
+function reviewedClassify(text){
+ const result=classify(text),override=reviewOverrides[norm(text)];
+ if(!override)return result;
+ return {...result,main:override.main,dimension:dimensionOf(override.main),confidence:'人工確認',positiveOnly:false};
+}
+function reviewCandidates(){
+ const ges=(state.months[state.month]?.rows||[]).filter(r=>r.isLow&&r.hasComment).map(r=>({source:'GES',comment:r.comment,restaurant:r.restaurant}));
+ const complaints=(state.auxByMonth[state.month]?.complaints||state.complaints||[]).filter(x=>x.report_month===state.month).map(x=>({source:x.source_type,comment:x.payload?.comment||'',restaurant:x.payload?.restaurant||''})).filter(x=>x.comment&&(x.source!=='080'||isValid080({...x,source:x.source,...x.payload})));
+ return [...ges,...complaints].map(x=>({...x,result:reviewedClassify(x.comment)})).filter(x=>!x.result.positiveOnly&&!reviewOverrides[norm(x.comment)]&&(x.result.confidence!=='高'||x.result.tags.length>1||x.result.dimension==='其他')).slice(0,500);
+}
+function renderReview(){
+ const root=document.querySelector('#reviewContent');if(!root)return;
+ const all=reviewCandidates(),bySource={GES:0,'080':0,'4128':0};all.forEach(x=>bySource[x.source]=(bySource[x.source]||0)+1);
+ root.innerHTML=`<div class="card"><h3>分類例外管理｜${esc(state.month||'尚未選擇月份')}</h3><p>只列出低信心、多重問題或其他分類；每筆僅有一個主要構面。人工修正保存在本瀏覽器，換電腦請匯出／匯入修正檔。</p><p>待確認：GES ${bySource.GES||0} 筆｜080 ${bySource['080']||0} 筆｜4128 ${bySource['4128']||0} 筆</p><button id="reviewExport">匯出修正 JSON</button> <button id="reviewImport">匯入修正 JSON</button><input id="reviewFile" type="file" accept=".json" hidden><div class="scroll" style="margin-top:12px">${table(['來源','餐廳','評論摘要','目前主因','信心','修正'],all.map((x,i)=>[x.source,x.restaurant,esc(x.comment.slice(0,85)),esc(x.result.dimension),x.result.confidence,`<button data-review="${i}">確認／修改</button>`]))}</div></div>`;
+ root.querySelectorAll('[data-review]').forEach(b=>b.onclick=()=>{
+  const x=all[Number(b.dataset.review)];if(!x)return;
+  const choices=ISSUE_ORDER.filter(k=>dimensionOf(k)!=='其他'||k==='其他/無法判斷');
+  const msg='請輸入主要問題編號（每筆只計一次）：\n'+choices.map((k,i)=>`${i+1}. ${k}（${dimensionOf(k)}）`).join('\n')+'\n\n'+x.comment.slice(0,180);
+  const n=Number(prompt(msg,String(Math.max(0,choices.indexOf(x.result.main))+1)));
+  if(!Number.isInteger(n)||n<1||n>choices.length)return;
+  reviewOverrides[norm(x.comment)]={main:choices[n]};saveReview();refreshReviewedData();
+ });
+ root.querySelector('#reviewExport').onclick=()=>{const blob=new Blob([JSON.stringify(reviewOverrides,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='GES_分類人工修正.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),500)};
+ root.querySelector('#reviewImport').onclick=()=>root.querySelector('#reviewFile').click();
+ root.querySelector('#reviewFile').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const data=JSON.parse(await f.text());if(!data||Array.isArray(data)||typeof data!=='object')throw Error('格式錯誤');for(const [k,v] of Object.entries(data)){if(!v||!ISSUE_ORDER.includes(v.main))throw Error('包含無效分類')}Object.assign(reviewOverrides,data);saveReview();refreshReviewedData()}catch(err){alert('無法匯入：'+err.message)}};
+}
+function refreshReviewedData(){
+ for(const month of Object.values(state.months)){for(const r of month.rows||[]){const c=reviewedClassify(r.comment);Object.assign(r,{main:c.main,dimension:c.dimension,tags:c.tags,confidence:c.confidence})}}
+ renderReview();if(typeof render==='function')render();
+}
 function classify(text){
  text=norm(text);
  const reviewed=(window.GES_REVIEWED_CLASSIFICATIONS||{})[text];
@@ -101,7 +136,7 @@ if(!text)return {main:'無評論',dimension:'其他',tags:[],items:[],confidence
 }
 
 function classifyPreservingKnown(row){
- const fresh=classify(row?.comment||'');
+ const fresh=reviewedClassify(row?.comment||'');
  if(fresh.positiveOnly)return fresh;
  const oldMain=norm(row?.main||row?.primary_issue||row?.issue||'');
  const unusable=new Set(['','其他/無法判斷','多重問題/主因不明','無評論','正向意見']);
@@ -208,7 +243,7 @@ function rowKey(r){return [stableDate(r.date),norm(r.restaurant),r.score===null?
 async function importFile(file){const original=await file.arrayBuffer();const data=await repairPowerBIWorkbook(original);const wb=XLSX.read(data,{type:'array',cellDates:true});let best=null;for(const sn of wb.SheetNames){const ws=wb.Sheets[sn];let a=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});if(!a.length)continue;let hi=a.findIndex(r=>r.some(c=>norm(c).includes('OSAT')));if(hi<0)hi=0;let headers=a[hi].map(norm);let score=findCol(headers,['綜合評級（OSAT、Google、外送平台）','綜合評級','OSAT整體滿意度','整體滿意度']);let comment=findCol(headers,['OSAT整體滿意度評論','整體滿意度評論','OSAT評論']);let rest=findCol(headers,['餐廳_名稱','餐廳名稱','餐廳','Restaurant']);if(score>=0&&comment>=0&&rest>=0){best={a,hi,headers,score,comment,rest};break}}
  if(!best)throw new Error('找不到必要欄位：餐廳、OSAT分數、OSAT整體滿意度評論。');
  const {a,hi,headers,score,comment,rest}=best;const date=findCol(headers,['日期','填寫時間','Survey Date','Date']);const center=findCol(headers,['中心','外送中心']);const group=findCol(headers,['Group','group']);const code=findCol(headers,['餐廳代碼','餐廳編號','Restaurant Code']);let month=detectMonth(a.slice(hi+1),date);if(!month)return;
- let rows=a.slice(hi+1).filter(r=>norm(r[rest])||num(r[score])!==null).map((r,i)=>{let sc=num(r[score]);let txt=norm(r[comment]);let c=classify(txt);return applyMapping({id:i+1,restaurant:norm(r[rest]),restaurant_code:code>=0?norm(r[code]):'',center:center>=0?norm(r[center]):'',group:group>=0?norm(r[group]):'',score:sc,comment:txt,isLow:sc!==null&&sc>=1&&sc<=3,hasComment:!!txt,main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,positiveOnly:!!c.positiveOnly,date:date>=0?stableDate(r[date]):''})});
+ let rows=a.slice(hi+1).filter(r=>norm(r[rest])||num(r[score])!==null).map((r,i)=>{let sc=num(r[score]);let txt=norm(r[comment]);let c=reviewedClassify(txt);return applyMapping({id:i+1,restaurant:norm(r[rest]),restaurant_code:code>=0?norm(r[code]):'',center:center>=0?norm(r[center]):'',group:group>=0?norm(r[group]):'',score:sc,comment:txt,isLow:sc!==null&&sc>=1&&sc<=3,hasComment:!!txt,main:c.main,dimension:c.dimension,tags:c.tags,items:c.items,confidence:c.confidence,positiveOnly:!!c.positiveOnly,date:date>=0?stableDate(r[date]):''})});
  // 同月份採逐筆去重：日期＋餐廳＋評分＋評論完全相同視為同一筆。
  const saved=await saveRowsToCloud(month,file.name,rows); const added=saved.added, duplicateCount=saved.duplicateCount;
  delete state.months[month];if(!state.availableMonths.includes(month))state.availableMonths.unshift(month);await loadCloud(month,true);
@@ -224,7 +259,7 @@ function syncGlobalCenterFilters(){const opts='<option value="">全市場</optio
 function pct(a,b){return b?100*a/b:0}function fmtp(v){return `${v.toFixed(1)}%`}function esc(s){return norm(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function groupBy(arr,key){let m={};for(const r of arr){let k=typeof key==='function'?key(r):r[key];(m[k||'未對應']??=[]).push(r)}return m}
 function kpi(label,value,note=''){return `<div class="kpi"><div class="label">${label}</div><div class="value">${value}</div><div class="note">${note}</div></div>`}
-function render(){syncGlobalCenterFilters();const all=current(),lo=low(),co=comments();document.querySelector('#dataStatus').textContent=all.length?`${state.month}｜${all.length.toLocaleString()} 筆`:'尚未匯入資料';const dc=Object.fromEntries(DIMENSION_ORDER.map(d=>[d,co.filter(r=>(r.dimension||dimensionOf(r.main))===d).length]));document.querySelector('#kpis').innerHTML=[kpi('有效問卷',all.filter(r=>r.score!==null).length.toLocaleString(),'當月匯入'),kpi('1～3分',lo.length.toLocaleString(),`低分率 ${fmtp(pct(lo.length,all.filter(r=>r.score!==null).length))}`),kpi('速度為主因',dc['速度'].toLocaleString(),fmtp(pct(dc['速度'],co.length))),kpi('品質為主因',dc['品質'].toLocaleString(),fmtp(pct(dc['品質'],co.length))),kpi('正確性為主因',dc['正確性'].toLocaleString(),fmtp(pct(dc['正確性'],co.length))),kpi('1分件數',lo.filter(r=>r.score===1).length.toLocaleString(),'嚴重低分')].join('');renderIssues(co);renderCenters(all);renderRestaurants(all);renderMissing(co);renderComments();renderTrend();renderFinding(all,co);renderGesTime();renderComplaints()}
+function render(){syncGlobalCenterFilters();const all=current(),lo=low(),co=comments();document.querySelector('#dataStatus').textContent=all.length?`${state.month}｜${all.length.toLocaleString()} 筆`:'尚未匯入資料';const dc=Object.fromEntries(DIMENSION_ORDER.map(d=>[d,co.filter(r=>(r.dimension||dimensionOf(r.main))===d).length]));document.querySelector('#kpis').innerHTML=[kpi('有效問卷',all.filter(r=>r.score!==null).length.toLocaleString(),'當月匯入'),kpi('1～3分',lo.length.toLocaleString(),`低分率 ${fmtp(pct(lo.length,all.filter(r=>r.score!==null).length))}`),kpi('速度為主因',dc['速度'].toLocaleString(),fmtp(pct(dc['速度'],co.length))),kpi('品質為主因',dc['品質'].toLocaleString(),fmtp(pct(dc['品質'],co.length))),kpi('正確性為主因',dc['正確性'].toLocaleString(),fmtp(pct(dc['正確性'],co.length))),kpi('1分件數',lo.filter(r=>r.score===1).length.toLocaleString(),'嚴重低分')].join('');renderIssues(co);renderCenters(all);renderRestaurants(all);renderMissing(co);renderComments();renderTrend();renderFinding(all,co);renderGesTime();renderComplaints();renderReview()}
 function renderIssues(co){let marketCnt=Object.fromEntries(DIMENSION_ORDER.map(d=>[d,0]));for(const r of co)marketCnt[r.dimension||dimensionOf(r.main)]++;let marketData=DIMENSION_ORDER.map(d=>[d,marketCnt[d]]).filter(x=>x[1]);if(state.chart)state.chart.destroy();state.chart=new Chart(document.querySelector('#issueChart'),{type:'bar',data:{labels:marketData.map(x=>x[0]),datasets:[{label:'主因筆數',data:marketData.map(x=>x[1])}]},options:{responsive:true,plugins:{legend:{display:false}}}});let fco=centerFiltered(co),dimCnt=Object.fromEntries(DIMENSION_ORDER.map(d=>[d,0]));for(const r of fco)dimCnt[r.dimension||dimensionOf(r.main)]++;let dimData=DIMENSION_ORDER.map(d=>[d,dimCnt[d]]).filter(x=>x[1]);let cnt={};for(const k of ISSUE_ORDER)cnt[k]=0;for(const r of fco)cnt[r.main]=(cnt[r.main]||0)+1;let detail=Object.entries(cnt).filter(x=>x[1]).sort((a,b)=>b[1]-a[1]);document.querySelector('#issueTable').innerHTML=`<div class="grid2"><div class="card"><h3>${state.globalCenter||'全市場'}－外送核心構面</h3>${table(['構面','主因筆數','占有文字低分'],dimData.map(([d,v])=>[d,v,fmtp(pct(v,fco.length))]))}</div><div class="card"><h3>細項原因</h3>${table(['構面','主要不滿','主因筆數','占有文字低分','有提及筆數'],detail.map(([k,v])=>[dimensionOf(k),k,v,fmtp(pct(v,fco.length)),fco.filter(r=>r.tags.includes(k)).length]))}</div></div>`}
 
 function centerStats(all){return Object.entries(groupBy(all,'center')).map(([c,rs])=>{let valid=rs.filter(r=>r.score!==null),lo=valid.filter(r=>r.isLow),co=lo.filter(r=>r.hasComment),main=topMain(co);return{c,survey:valid.length,low:lo.length,rate:pct(lo.length,valid.length),share:0,main,dimension:dimensionOf(main)}}).map(x=>({...x,share:pct(x.low,all.filter(r=>r.isLow).length)})).sort((a,b)=>b.low-a.low)}
@@ -321,7 +356,7 @@ function isValid080(r){
  if(!channel&&!feedback)return true;
  return channel.includes('網路外送')&&feedback.includes('抱怨');
 }
-function complaintClass(text){let t=norm(text),c=classify(t);return c.main==='其他/無法判斷'&&hasAny(t,['遲到','晚到','太慢','延遲'])?'遲到/配送時效':c.main}
+function complaintClass(text){let t=norm(text),c=reviewedClassify(t);return c.main==='其他/無法判斷'&&hasAny(t,['遲到','晚到','太慢','延遲'])?'遲到/配送時效':c.main}
 function normalizeOrder(s){return norm(s).replace(/\s/g,'').toUpperCase()}
 function restaurantCodeOf(r){let s=normalizeOrder(r.orderNo||'');let m=s.match(/^(\d{3})-/);return m?m[1]:''}
 function canonicalOrder(s){s=normalizeOrder(s);if(!s)return '';let m=s.match(/^(?:[^-]+-)?(\d{3})(\d{4})$/);if(m)return `${m[1]}-${m[2]}`;m=s.match(/^(\d{3})-(\d{4})$/);if(m)return `${m[1]}-${m[2]}`;let digits=s.replace(/\D/g,'');if(digits.length>=7)return `${digits.slice(-7,-4)}-${digits.slice(-4)}`;return s}
@@ -490,3 +525,7 @@ function showApp(){document.body.classList.remove('locked');const el=document.qu
 document.querySelector('#loginForm')?.addEventListener('submit',async e=>{e.preventDefault();const email=document.querySelector('#loginEmail').value.trim(),pw=document.querySelector('#loginPassword').value;const btn=document.querySelector('#loginBtn');try{btn.disabled=true;document.querySelector('#loginMsg').textContent='登入中…';await login(email,pw);showApp();await loadCloud()}catch(err){showLogin(err.message)}finally{btn.disabled=false}});
 document.querySelector('#logoutBtn')?.addEventListener('click',logout);
 boot();
+
+// v8.19 分類審核頁隨切頁與資料載入更新（不發送額外網路請求）
+document.addEventListener('click',e=>{if(e.target.closest('[data-page="review"]'))setTimeout(renderReview,0)});
+document.querySelector('#monthSelect')?.addEventListener('change',()=>setTimeout(renderReview,500));
