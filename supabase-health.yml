@@ -1,0 +1,27 @@
+name: Supabase Health Check
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 1" # Mondays 10:00 Taiwan time
+
+permissions:
+  contents: read
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check Supabase Auth availability
+        env:
+          SUPABASE_URL: https://piccgvophhtnmggwwobn.supabase.co
+        run: |
+          set -euo pipefail
+          status=$(curl --silent --show-error --location --max-time 20 --output /tmp/supabase-health.json --write-out '%{http_code}' "$SUPABASE_URL/auth/v1/health")
+          echo "Supabase Auth health HTTP status: $status"
+          if [ "$status" != "200" ]; then
+            echo "::error::Supabase health check failed (HTTP $status). Check Supabase Dashboard for paused project or service outage."
+            exit 1
+          fi
+          echo "Supabase Auth health endpoint responded successfully. This does not validate database access or prevent automatic pausing."
