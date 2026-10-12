@@ -164,6 +164,8 @@ async function cacheGet(k){try{const db=await cacheDb();return await new Promise
 async function cacheSet(k,v){try{const db=await cacheDb();await new Promise((ok,no)=>{const t=db.transaction('kv','readwrite').objectStore('kv').put(v,k);t.onsuccess=()=>ok();t.onerror=()=>no(t.error)})}catch(_){}}
 async function cacheClear(){try{const db=await cacheDb();await new Promise((ok,no)=>{const t=db.transaction('kv','readwrite').objectStore('kv').clear();t.onsuccess=()=>ok();t.onerror=()=>no(t.error)})}catch(_){}}
 async function api(path,options={}){
+ const method=(options.method||'GET').toUpperCase();
+ if(!['GET','HEAD'].includes(method)&&authSession?.user?.id!=='f75f1b3d-39d5-4f4b-b211-7f423ffa8357')throw new Error('只有 OP 帳號可修改雲端資料');
  const token=await ensureAccessToken();
  const headers={apikey:SUPABASE_KEY,Authorization:`Bearer ${token}`,'Content-Type':'application/json',...(options.headers||{})};
  const res=await fetch(`${SUPABASE_URL}/rest/v1/${path}`,{...options,headers});
