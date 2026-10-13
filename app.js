@@ -397,16 +397,19 @@ async function importThird(file){let a=await readWorkbook(file);let hi=a.findInd
 // 僅使用已確認的三碼對照；不能把 TWI/TWB 尾數當作 4128 三碼。
 const COMPLAINT_4128_CODES=window.COMPLAINT_4128_CODE_MAPPING||{};
 function complaintRestaurantInfo(r){
+ // 000、001 是正常訂單，但不代表單店代碼；一律回退到原始客訴餐廳。
  const code=restaurantCodeOf(r)||norm(r.restaurantCode)||'';
- const mapped=code?COMPLAINT_4128_CODES[code]:null;
+ const special=code==='000'||code==='001';
+ const mapped=(!special&&code)?COMPLAINT_4128_CODES[code]:null;
  const raw=norm(r.restaurant);
- const validRaw=raw&&!normalizeCenterName(raw)&&! /^(\d+|無代碼|未對應)$/.test(raw);
- let name=mapped?(typeof mapped==='string'?mapped:norm(mapped.name||mapped.restaurant)):'';
- if(!name&&validRaw)name=raw;
+ // 訂餐中心、外送中心、共享中心是行政歸屬，不能當成出餐餐廳。
+ const invalidRaw=!raw||/^(\d+|無代碼|未對應|訂餐中心|客服中心|CSC)$/i.test(raw)||/外送(共享)?中心/.test(raw);
+ const mappedName=mapped?(typeof mapped==='string'?norm(mapped):norm(mapped.name||mapped.restaurant)):'';
+ const name=mappedName||(!invalidRaw?raw:'');
  const m=RESTAURANT_MAPPING[name];
  const center=normalizeCenterName((typeof mapped==='object'&&mapped?.center)||m?.center)||normalizeCenterName(r.region)||normalizeCenterName(r.center)||'未對應';
  return {name:name||(code?`待對照（${code}）`:'未對應餐廳'),code:code||'無代碼',center,
-  key:name?`name:${name}`:`code:${code||'unknown'}`,matchedBy:mapped?'前三碼':validRaw?'客訴所屬餐廳':'待對照'};
+  key:name?`name:${name}`:`code:${code||'unknown'}`,matchedBy:mappedName?'前三碼':name?'客訴所屬餐廳':'待對照'};
 }
 function complaintRestaurantName(r){return complaintRestaurantInfo(r).name}
 function complaintRankStats(records){
@@ -430,7 +433,7 @@ async function rebuildComplaintSummary(month=state.month){
   if(!month)return;
   let raw=(state.auxByMonth[month]?.complaints||state.complaints||[]).filter(x=>x.report_month===month).map(x=>({...x.payload,source:x.source_type,month:x.report_month})).filter(isValid080);
   const counts=new Map();
-  for(const r of raw){const center=complaintCenterOf(r);if(!SIX_CENTERS.includes(center))continue;const issue=complaintIssueGroup(complaintClass(r.comment));const key=[month,center,r.source,issue].join('|');counts.set(key,(counts.get(key)||0)+1)}
+  for(const r of raw){const center=r.source==='4128'?complaintRestaurantInfo(r).center:complaintCenterOf(r);if(!SIX_CENTERS.includes(center))continue;const issue=complaintIssueGroup(complaintClass(r.comment));const key=[month,center,r.source,issue].join('|');counts.set(key,(counts.get(key)||0)+1)}
   const rows=[...counts].map(([key,count])=>{const [report_month,center,source_type,issue_group]=key.split('|');return{report_month,center,source_type,issue_group,complaint_count:count,updated_at:new Date().toISOString()}});
   // 先清掉該月摘要再重建；只處理小型摘要，不重讀原始明細。
   await api(`${COMPLAINT_SUMMARY_TABLE}?report_month=eq.${encodeURIComponent(month)}`,{method:'DELETE',headers:{Prefer:'return=minimal'}});
