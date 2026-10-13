@@ -394,22 +394,42 @@ async function importComplaint(file,source){
  let month=rows.find(r=>r.month)?.month||prompt('請輸入月份，例如 2026-08','2026-08');if(!month)return;rows.forEach(r=>r.month=month);let result=await saveGeneric('complaint_records',month,file.name,source,rows);delete state.auxByMonth[month];await loadAuxCloud(month,true);try{await rebuildComplaintSummary(month);await loadComplaintTrendData(true)}catch(e){console.warn('客訴趨勢摘要更新失敗',e)}toast(`${source}：有效讀取 ${result.read} 筆｜新增 ${result.added} 筆｜重複排除 ${result.duplicateCount} 筆`)
 }
 async function importThird(file){let a=await readWorkbook(file);let hi=a.findIndex(r=>r.some(c=>['訂購號碼','third_party','餐廳(ID)'].some(k=>norm(c).includes(k))));if(hi<0)throw new Error('找不到第三方訂單欄位');let h=a[hi].map(norm),date=findCol(h,['落單時間','日期','訂單時間']),order=findCol(h,['訂購號碼','訂單編號']),party=findCol(h,['third_party','第三方']),restaurant=findCol(h,['餐廳(ID)','餐廳']);let rows=a.slice(hi+1).filter(r=>norm(r[order])).map(r=>{let p=dateParts(r[date]);return{month:p.month,date:p.date,orderNo:norm(r[order]),thirdParty:party>=0?norm(r[party]):'第三方',restaurant:restaurant>=0?norm(r[restaurant]):''}});let month=rows.find(r=>r.month)?.month||prompt('請輸入月份，例如 2026-08','2026-08');if(!month)return;rows.forEach(r=>r.month=month);let result=await saveGeneric('third_party_orders',month,file.name,'',rows);delete state.auxByMonth[month];await loadAuxCloud(month,true);toast(`第三方訂單：讀取 ${result.read} 筆｜新增 ${result.added} 筆｜重複排除 ${result.duplicateCount} 筆`)}
-// 僅使用已確認的三碼對照；不能把 TWI/TWB 尾數當作 4128 三碼。
+// 4128 訂單前三碼對照 TWI/TWB 尾三碼；000/001 使用客訴原始餐廳。
+// 如有同碼對應多店，不猜測，改讀客訴原始餐廳。
 const COMPLAINT_4128_CODES=window.COMPLAINT_4128_CODE_MAPPING||{};
+const COMPLAINT_CODE_INDEX=(()=>{
+ const index={};
+ for(const [name,meta] of Object.entries(RESTAURANT_MAPPING)){
+  const full=String(meta?.code||'').toUpperCase();
+  const match=full.match(/^TW[IB](\d{3})$/);
+  if(!match)continue;
+  const code=match[1];
+  if(!index[code])index[code]=[];
+  if(!index[code].some(x=>x.name===name))index[code].push({name,center:meta.center});
+ }
+ return index;
+})();
 function complaintRestaurantInfo(r){
- // 000、001 是正常訂單，但不代表單店代碼；一律回退到原始客訴餐廳。
  const code=restaurantCodeOf(r)||norm(r.restaurantCode)||'';
- const special=code==='000'||code==='001';
- const mapped=(!special&&code)?COMPLAINT_4128_CODES[code]:null;
  const raw=norm(r.restaurant);
- // 訂餐中心、外送中心、共享中心是行政歸屬，不能當成出餐餐廳。
- const invalidRaw=!raw||/^(\d+|無代碼|未對應|訂餐中心|客服中心|CSC)$/i.test(raw)||/外送(共享)?中心/.test(raw);
- const mappedName=mapped?(typeof mapped==='string'?norm(mapped):norm(mapped.name||mapped.restaurant)):'';
- const name=mappedName||(!invalidRaw?raw:'');
- const m=RESTAURANT_MAPPING[name];
- const center=normalizeCenterName((typeof mapped==='object'&&mapped?.center)||m?.center)||normalizeCenterName(r.region)||normalizeCenterName(r.center)||'未對應';
- return {name:name||(code?`待對照（${code}）`:'未對應餐廳'),code:code||'無代碼',center,
-  key:name?`name:${name}`:`code:${code||'unknown'}`,matchedBy:mappedName?'前三碼':name?'客訴所屬餐廳':'待對照'};
+ const invalidRaw=!raw||/^(\d+|無代碼|未對應|未對應餐廳|訂餐中心|客服中心|CSC)$/i.test(raw)||/外送(共享)?中心/.test(raw);
+ let name='',mappedCenter='',matchedBy='待對照';
+ if(code&&code!=='000'&&code!=='001'){
+  const override=COMPLAINT_4128_CODES[code];
+  if(override){
+   name=typeof override==='string'?norm(override):norm(override.name||override.restaurant);
+   mappedCenter=typeof override==='object'?norm(override.center):'';
+  }else if(COMPLAINT_CODE_INDEX[code]?.length===1){
+   name=COMPLAINT_CODE_INDEX[code][0].name;
+   mappedCenter=COMPLAINT_CODE_INDEX[code][0].center;
+  }
+  if(name)matchedBy='訂單前三碼';
+ }
+ if(!name&&!invalidRaw){name=raw;matchedBy='客訴所屬餐廳'}
+ const mapping=RESTAURANT_MAPPING[name];
+ const center=normalizeCenterName(mappedCenter||mapping?.center)||normalizeCenterName(r.region)||normalizeCenterName(r.center)||'未對應';
+ return {name:name||'未對應餐廳',code:code||'無代碼',center,
+  key:name?`name:${name}`:`unmatched:${code||'none'}`,matchedBy,matched:!!name};
 }
 function complaintRestaurantName(r){return complaintRestaurantInfo(r).name}
 function complaintRankStats(records){
@@ -584,11 +604,11 @@ function renderComplaints(){
  let rs=raw.filter(r=>(state.complaintSource==='all'||r.source===state.complaintSource)&&(!state.complaintCenter||(r.source==='4128'?complaintRestaurantInfo(r).center:complaintCenterOf(r))===state.complaintCenter));if(state.complaintIssue)rs=rs.filter(r=>complaintClass(r.comment)===state.complaintIssue); let n080=rs.filter(r=>r.source==='080').length,n4128=rs.filter(r=>r.source==='4128').length,late=rs.filter(r=>r.source==='4128'&&complaintClass(r.comment)==='遲到/配送時效'),third=late.filter(r=>isThirdPartyComplaint(r)===true),thirdEffective=rs.filter(isEffectiveThirdPartyComplaint);
  let days={};for(const r of rs){let d=dateParts(r.date).day;if(d)days[d]=(days[d]||0)+1}
  let issues={},issues080={},issues4128={};for(const r of rs){let k=complaintClass(r.comment);issues[k]=(issues[k]||0)+1;if(r.source==='080')issues080[k]=(issues080[k]||0)+1;if(r.source==='4128')issues4128[k]=(issues4128[k]||0)+1}
- let rankRows=rs.filter(r=>r.source==='4128'),stats=complaintRankStats(rankRows),codeSel=document.querySelector('#complaintRestaurantCode');if(codeSel){let old=state.complaintRestaurantCode;codeSel.innerHTML='<option value="">全部餐廳</option>'+stats.map(x=>`<option value="${esc(x.key)}">${esc(x.name)}（${esc(x.code)}，${x.count}筆）</option>`).join('');if(stats.some(x=>x.key===old)){codeSel.value=old}else{state.complaintRestaurantCode='';codeSel.value=''}}
+ let rankRows=rs.filter(r=>r.source==='4128'),unmatchedRows=rankRows.filter(r=>!complaintRestaurantInfo(r).matched),stats=complaintRankStats(rankRows.filter(r=>complaintRestaurantInfo(r).matched)),codeSel=document.querySelector('#complaintRestaurantCode');if(codeSel){let old=state.complaintRestaurantCode;codeSel.innerHTML='<option value="">全部餐廳</option>'+stats.map(x=>`<option value="${esc(x.key)}">${esc(x.name)}（${x.count}筆）</option>`).join('');if(stats.some(x=>x.key===old)){codeSel.value=old}else{state.complaintRestaurantCode='';codeSel.value=''}}
  let chosen=state.complaintRestaurantCode?stats.find(x=>x.key===state.complaintRestaurantCode):null,detail='';
  if(chosen){let dd=Object.entries(groupBy(chosen.rows,r=>dateParts(r.date).day)).filter(x=>x[0]).map(([d,v])=>[d,v.length]).sort((a,b)=>a[0].localeCompare(b[0]));detail=`<div class="card" style="margin-top:16px"><h3>${esc(chosen.name)}（${esc(chosen.code)}）｜客訴發生分析</h3><div class="kpi-grid">${kpi('客訴件數',chosen.count,'筆')}${kpi('發生天數',chosen.days,'天')}${kpi('最高日期',chosen.topDay,`${chosen.topDayN} 筆`)}${kpi('第三方遲到',chosen.third,'筆')}</div><h3>日期分布</h3>${table(['日期','客訴件數'],dd)}</div>`}
  let issueTable=state.complaintSource==='all'?table(['問題','080','4128','合計'],Object.keys(issues).sort((a,b)=>issues[b]-issues[a]).map(k=>[k,issues080[k]||0,issues4128[k]||0,issues[k]||0])):table(['問題','件數'],Object.entries(issues).sort((a,b)=>b[1]-a[1]));
- let e=document.querySelector('#complaintContent');if(!e)return;e.className='';e.innerHTML=`<div class="kpi-grid">${kpi('080 網路外送抱怨',n080,'僅網路外送＋抱怨')}${kpi('4128 抱怨',n4128,'全部為外送訂單')}${kpi('4128 遲到',late.length,'與問題分類中的 4128 遲到一致')}${kpi('第三方有效抱怨',thirdEffective.length,'排除：漏餐/錯餐、價格、系統問題')}${kpi('其中第三方遲到',third.length,`日期＋訂單號配對｜第三方訂單 ${state.thirdParty.length.toLocaleString()} 筆`)}</div><div class="grid2"><div class="card"><h3>問題分類${state.complaintSource==='all'?'｜來源拆分':''}</h3>${issueTable}</div><div class="card"><h3>抱怨日期</h3>${table(['日期','件數'],Object.entries(days).sort((a,b)=>b[1]-a[1]).slice(0,31))}</div></div><div class="card" style="margin-top:16px"><h3>4128｜餐廳排名（依目前問題類型）</h3>${table(['餐廳名稱','餐廳代碼','中心','客訴件數','發生天數','最高日期','第三方遲到'],stats.map(x=>[x.name,x.code,x.center,x.count,x.days,`${x.topDay} (${x.topDayN})`,x.third]))}</div>${detail}<div class="card" style="margin-top:16px"><h3>4128 客訴明細（依目前問題類型）</h3><div class="scroll">${table(['日期','餐廳名稱','餐廳代碼','中心','訂單編號','第三方遲到','內容'],rankRows.filter(r=>!state.complaintRestaurantCode||complaintRestaurantInfo(r).key===state.complaintRestaurantCode).map(r=>[dateParts(r.date).day,complaintRestaurantName(r),restaurantCodeOf(r)||'無代碼',complaintRestaurantInfo(r).center,r.orderNo,isThirdPartyComplaint(r)===true?'是':'否',r.comment]))}</div></div><div id="complaintTrendArea" style="margin-top:16px"><div class="card empty">正在讀取改善趨勢…</div></div>`;refreshComplaintTrend()
+ let e=document.querySelector('#complaintContent');if(!e)return;e.className='';e.innerHTML=`<div class="kpi-grid">${kpi('080 網路外送抱怨',n080,'僅網路外送＋抱怨')}${kpi('4128 抱怨',n4128,'全部為外送訂單')}${kpi('4128 遲到',late.length,'與問題分類中的 4128 遲到一致')}${kpi('第三方有效抱怨',thirdEffective.length,'排除：漏餐/錯餐、價格、系統問題')}${kpi('其中第三方遲到',third.length,`日期＋訂單號配對｜第三方訂單 ${state.thirdParty.length.toLocaleString()} 筆`)}</div><div class="grid2"><div class="card"><h3>問題分類${state.complaintSource==='all'?'｜來源拆分':''}</h3>${issueTable}</div><div class="card"><h3>抱怨日期</h3>${table(['日期','件數'],Object.entries(days).sort((a,b)=>b[1]-a[1]).slice(0,31))}</div></div><div class="card" style="margin-top:16px"><h3>4128｜餐廳排名（依目前問題類型）</h3><p style="font-size:12px;color:#667085">未對應餐廳：${unmatchedRows.length} 筆（不列入餐廳排名，仍保留於客訴總數及明細）</p>${table(['餐廳名稱','中心','客訴件數','發生天數','最高日期','第三方遲到'],stats.map(x=>[x.name,x.center,x.count,x.days,`${x.topDay} (${x.topDayN})`,x.third]))}</div>${detail}<div class="card" style="margin-top:16px"><h3>4128 客訴明細（依目前問題類型）</h3><div class="scroll">${table(['日期','餐廳名稱','中心','訂單編號','第三方遲到','內容'],rankRows.filter(r=>!state.complaintRestaurantCode||complaintRestaurantInfo(r).key===state.complaintRestaurantCode).map(r=>[dateParts(r.date).day,complaintRestaurantName(r),complaintRestaurantInfo(r).center,r.orderNo,isThirdPartyComplaint(r)===true?'是':'否',r.comment]))}</div></div><div id="complaintTrendArea" style="margin-top:16px"><div class="card empty">正在讀取改善趨勢…</div></div>`;refreshComplaintTrend()
 }
 document.querySelector('#importBtn').onclick=()=>document.querySelector('#fileInput').click();document.querySelector('#fileInput').onchange=e=>e.target.files[0]&&importFile(e.target.files[0]).catch(err=>alert(err.message));document.querySelector('#monthSelect').onchange=e=>{loadCloud(e.target.value)};document.querySelectorAll('.tab:not(.disabled)').forEach(b=>b.onclick=async()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelector('#'+b.dataset.page).classList.add('active');if(b.dataset.page==='trend'){document.querySelector('#trendContent').innerHTML='正在讀取上月資料…';await ensurePreviousMonthForTrend();renderTrend()}});document.querySelector('#filterIssue').onchange=renderComments;document.querySelector('#restaurantRank').onchange=e=>{state.restaurantRank=e.target.value;renderRestaurants(current())};document.querySelector('#filterText').oninput=renderComments;document.querySelector('#exportBtn').onclick=exportAnalysis;document.querySelector('#import080Btn').onclick=()=>document.querySelector('#file080').click();document.querySelector('#import4128Btn').onclick=()=>document.querySelector('#file4128').click();document.querySelector('#import3rdBtn').onclick=()=>document.querySelector('#file3rd').click();document.querySelector('#file080').onchange=e=>e.target.files[0]&&importComplaint(e.target.files[0],'080').catch(x=>alert(x.message));document.querySelector('#file4128').onchange=e=>e.target.files[0]&&importComplaint(e.target.files[0],'4128').catch(x=>alert(x.message));document.querySelector('#file3rd').onchange=e=>e.target.files[0]&&importThird(e.target.files[0]).catch(x=>alert(x.message));document.querySelector('#complaintSource').onchange=e=>{state.complaintSource=e.target.value;renderComplaints()};document.querySelector('#complaintCenter').onchange=e=>{state.complaintCenter=e.target.value;renderComplaints()};document.querySelector('#complaintRestaurantCode').onchange=e=>{state.complaintRestaurantCode=e.target.value;renderComplaints()};
 function initIssueFilters(){
